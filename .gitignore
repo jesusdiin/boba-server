@@ -1,0 +1,7 @@
+node_modules
+dist
+/generated/prisma
+# Variables de entorno (solo se versiona .env.example)
+.env
+.env.*
+!.env.example

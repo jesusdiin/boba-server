@@ -1,0 +1,6 @@
+# Paquetes a los que se les permite correr scripts de instalación
+# (motores de Prisma y el binario de esbuild que usa tsx).
+allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true

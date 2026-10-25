@@ -1,0 +1,110 @@
+// Esquema del servidor de sync de Boba POS.
+// Multi-tenant: organización → sucursales → dispositivos. Los eventos son el
+// log de sync y, a la vez, el respaldo en la nube (ver boba_pos/docs/ARQUITECTURA.md).
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  branches Branch[]
+  devices  Device[]
+  events   Event[]
+
+  @@map("organizations")
+}
+
+model Branch {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  timezoneId     String   @default("America/Mexico_City") @map("timezone_id")
+  currencyCode   String   @default("MXN") @map("currency_code")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  devices      Device[]
+  pairingCodes DevicePairingCode[]
+  events       Event[]
+
+  @@index([organizationId])
+  @@map("branches")
+}
+
+enum DeviceMode {
+  staff
+  kiosk
+
+  @@map("device_mode")
+}
+
+model Device {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  branchId       String     @map("branch_id") @db.Uuid
+  name           String
+  mode           DeviceMode @default(staff)
+  /// sha256 del token; el token en claro solo se entrega al emparejar.
+  tokenHash      String     @unique @map("token_hash")
+  lastSeenAt     DateTime?  @map("last_seen_at") @db.Timestamptz(3)
+  revokedAt      DateTime?  @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  branch       Branch       @relation(fields: [branchId], references: [id])
+  events       Event[]
+
+  @@index([branchId])
+  @@map("devices")
+}
+
+model DevicePairingCode {
+  id             String    @id @default(uuid()) @db.Uuid
+  branchId       String    @map("branch_id") @db.Uuid
+  /// sha256 del código (8 caracteres legibles).
+  codeHash       String    @unique @map("code_hash")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt         DateTime? @map("used_at") @db.Timestamptz(3)
+  usedByDeviceId String?   @map("used_by_device_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@map("device_pairing_codes")
+}
+
+/// Log de eventos de sync. `serverSeq` es el cursor global del pull.
+model Event {
+  serverSeq       BigInt   @id @default(autoincrement()) @map("server_seq")
+  /// Clave de idempotencia generada en el dispositivo (UUIDv7).
+  eventId         String   @unique @map("event_id") @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  branchId        String   @map("branch_id") @db.Uuid
+  deviceId        String   @map("device_id") @db.Uuid
+  type            String
+  aggregateType   String   @map("aggregate_type")
+  aggregateId     String   @map("aggregate_id")
+  v               Int
+  payload         Json     @db.JsonB
+  userId          String?  @map("user_id")
+  deviceCreatedAt DateTime @map("device_created_at") @db.Timestamptz(3)
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  branch       Branch       @relation(fields: [branchId], references: [id])
+  device       Device       @relation(fields: [deviceId], references: [id])
+
+  @@index([branchId, serverSeq])
+  @@map("events")
+}
