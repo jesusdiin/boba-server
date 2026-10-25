@@ -5,6 +5,8 @@ import { requireDevice } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import type { BranchNotifier } from '../realtime/branchNotifier.js';
+import { actorAndPermission } from '../sync/permissions.js';
+import { applyRules, project } from '../sync/rules.js';
 import {
   eventRejection,
   MAX_PUSH_BATCH,
@@ -21,11 +23,16 @@ const PullQuery = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_PUSH_BATCH).default(200),
 });
 
-type Rejected = { eventId: string | null; code: string; message: string };
+type Rejected = {
+  eventId: string | null;
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
 
-/// `userId` del payload cuando el evento lo trae (auditoría y Fase 4).
-const userIdOf = (payload: Record<string, unknown>): string | null =>
-  typeof payload.userId === 'string' ? payload.userId : null;
+/// Actor del evento (auditoría), si lo trae.
+const userIdOf = (type: string, payload: Record<string, unknown>): string | null =>
+  actorAndPermission(type, payload)?.actor ?? null;
 
 export function syncRouter(db: Db, notifier: BranchNotifier): Router {
   const router = Router();
@@ -70,40 +77,58 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
       else valid.push(parsed.data);
     }
 
-    await db.$transaction(async (tx) => {
-      for (const e of valid) {
-        const inserted = await tx.$queryRaw<{ server_seq: bigint }[]>`
-          INSERT INTO events (
-            event_id, organization_id, branch_id, device_id, type,
-            aggregate_type, aggregate_id, v, payload, user_id, device_created_at
-          ) VALUES (
-            ${e.eventId}::uuid, ${device.organizationId}::uuid, ${device.branchId}::uuid,
-            ${device.id}::uuid, ${e.type}, ${e.aggregateType}, ${e.aggregateId},
-            ${e.payload.v}, ${JSON.stringify(e.payload)}::jsonb, ${userIdOf(e.payload)},
-            ${new Date(e.createdAtUtc)}
-          )
-          ON CONFLICT (event_id) DO NOTHING
-          RETURNING server_seq`;
-        const row = inserted[0];
-        if (row) {
-          accepted.push({ eventId: e.eventId, serverSeq: row.server_seq.toString() });
-          continue;
-        }
-        // Ya existía: idempotente si es de esta sucursal; si no, nunca se
-        // revela ni se mezcla entre tenants.
-        const existing = await tx.event.findUnique({
-          where: { eventId: e.eventId },
-          select: { branchId: true },
-        });
-        if (existing?.branchId === device.branchId) duplicates.push(e.eventId);
-        else
-          rejected.push({
-            eventId: e.eventId,
-            code: 'conflict_other_branch',
-            message: 'El eventId ya existe en otra sucursal',
+    await db.$transaction(
+      async (tx) => {
+        // Un árbitro por sucursal a la vez: los pushes concurrentes de la
+        // misma sucursal esperan aquí y se evalúan en orden.
+        await tx.$queryRaw`SELECT id FROM branches WHERE id = ${device.branchId}::uuid FOR UPDATE`;
+
+        for (const e of valid) {
+          // Reenvío: idempotente si es de esta sucursal (no se re-arbitra); si
+          // no, nunca se revela ni se mezcla entre tenants.
+          const existing = await tx.event.findUnique({
+            where: { eventId: e.eventId },
+            select: { branchId: true },
           });
-      }
-    });
+          if (existing) {
+            if (existing.branchId === device.branchId) duplicates.push(e.eventId);
+            else
+              rejected.push({
+                eventId: e.eventId,
+                code: 'conflict_other_branch',
+                message: 'El eventId ya existe en otra sucursal',
+              });
+            continue;
+          }
+
+          const verdict = await applyRules(tx, device, e);
+          if (!verdict.ok) {
+            rejected.push({
+              eventId: e.eventId,
+              code: verdict.code,
+              message: verdict.message,
+              ...(verdict.details ? { details: verdict.details } : {}),
+            });
+            continue;
+          }
+          const payload = verdict.payload;
+          const [row] = await tx.$queryRaw<{ server_seq: bigint }[]>`
+            INSERT INTO events (
+              event_id, organization_id, branch_id, device_id, type,
+              aggregate_type, aggregate_id, v, payload, user_id, device_created_at
+            ) VALUES (
+              ${e.eventId}::uuid, ${device.organizationId}::uuid, ${device.branchId}::uuid,
+              ${device.id}::uuid, ${e.type}, ${e.aggregateType}, ${e.aggregateId},
+              ${e.payload.v}, ${JSON.stringify(payload)}::jsonb, ${userIdOf(e.type, payload)},
+              ${new Date(e.createdAtUtc)}
+            )
+            RETURNING server_seq`;
+          await project(tx, device.branchId, e.type, e.aggregateId, payload, row!.server_seq);
+          accepted.push({ eventId: e.eventId, serverSeq: row!.server_seq.toString() });
+        }
+      },
+      { timeout: 30_000 },
+    );
 
     // Aviso a los demás dispositivos de la sucursal (después del commit).
     const last = accepted.at(-1);

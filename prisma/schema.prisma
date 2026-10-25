@@ -37,6 +37,9 @@ model Branch {
   devices      Device[]
   pairingCodes DevicePairingCode[]
   events       Event[]
+  states       AggregateState[]
+  shiftAliases ShiftAlias[]
+  conflicts    SyncConflict[]
 
   @@index([organizationId])
   @@map("branches")
@@ -107,4 +110,58 @@ model Event {
 
   @@index([branchId, serverSeq])
   @@map("events")
+}
+
+/// Proyección: estado vigente de cada entidad de la sucursal, derivado de
+/// `events`. Es lo que usa el servidor para arbitrar (LWW por versión,
+/// transiciones de turno y pedido, rol del actor). Reconstruible con
+/// `rebuildProjections`.
+model AggregateState {
+  branchId      String   @map("branch_id") @db.Uuid
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  /// `version` de la fila (0 si la entidad no versiona).
+  version       Int      @default(0)
+  /// Turno: open/closed. Pedido: pending/fulfilled/cancelled. Usuario: rol.
+  status        String?
+  /// Fila vigente tal como la tiene la app (se devuelve en los rechazos).
+  row           Json     @db.JsonB
+  lastServerSeq BigInt   @map("last_server_seq")
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, aggregateType, aggregateId])
+  @@index([branchId, aggregateType, status])
+  @@map("aggregate_state")
+}
+
+/// Turno perdedor de una apertura simultánea → turno ganador. Las ventas y
+/// movimientos que llegan con el perdedor se reescriben al ganador.
+model ShiftAlias {
+  branchId    String   @map("branch_id") @db.Uuid
+  fromShiftId String   @map("from_shift_id")
+  intoShiftId String   @map("into_shift_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, fromShiftId])
+  @@map("shift_aliases")
+}
+
+/// Conflictos aceptados pero dignos de revisión (doble cobro, cierre de turno
+/// descartado al fusionar).
+model SyncConflict {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  kind      String
+  eventId   String   @map("event_id") @db.Uuid
+  details   Json     @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([branchId, createdAt])
+  @@map("sync_conflicts")
 }

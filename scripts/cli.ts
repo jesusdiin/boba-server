@@ -6,6 +6,7 @@
  *   pnpm cli branch:create <orgId> "Sucursal Centro" [--tz America/Mexico_City]
  *   pnpm cli pair-code <branchId>
  *   pnpm cli devices <branchId>
+ *   pnpm cli projections:rebuild [branchId]
  */
 import qrcode from 'qrcode-terminal';
 
@@ -83,8 +84,17 @@ async function main(): Promise<void> {
       console.table(devices);
       return;
     }
+    case 'projections:rebuild': {
+      const { events } = await admin<{ events: number }>('POST', '/projections/rebuild', {
+        branchId: args[0],
+      });
+      console.log(`Proyecciones reconstruidas desde ${events} eventos`);
+      return;
+    }
     default:
-      console.log('Comandos: org:create | branch:create | pair-code | devices');
+      console.log(
+        'Comandos: org:create | branch:create | pair-code | devices | projections:rebuild',
+      );
       process.exitCode = command ? 1 : 0;
   }
 }

@@ -45,6 +45,7 @@ pnpm cli org:create "Boba & Co."                 # → orgId
 pnpm cli branch:create <orgId> "Sucursal Centro" [--tz America/Mexico_City]
 pnpm cli pair-code <branchId>                    # → código de 8 caracteres + QR (15 min)
 pnpm cli devices <branchId>                      # dispositivos emparejados
+pnpm cli projections:rebuild [branchId]          # rehace aggregate_state desde events
 ```
 
 ## API v1
@@ -70,8 +71,13 @@ Organización, sucursal y dispositivo salen **solo** del token.
 - `POST /v1/sync/push {events: [...]}` (máx. 500). Cada evento es la fila del
   outbox: `{eventId, type, aggregateType, aggregateId, payload: {v, …}, createdAtUtc}`.
   Responde `{accepted: [{eventId, serverSeq}], duplicates: [eventId], rejected: [{eventId, code, message}]}`.
-  Un reenvío vuelve en `duplicates` (idempotente: es éxito). Rechazos:
+  Un reenvío vuelve en `duplicates` (idempotente: es éxito). Rechazos de forma:
   `invalid_event`, `unknown_type`, `unsupported_version`, `conflict_other_branch`.
+  Rechazos del árbitro (con `details` para que el cliente resuelva):
+  `shift_conflict`, `shift_merged`, `invalid_transition`, `stale_version`,
+  `forbidden`, `unknown_user` (reglas en `../boba_pos/docs/EVENTOS.md`).
+  El payload que se guarda puede venir reescrito (`shiftId` de turnos
+  fusionados, versión del pedido cobrado).
 - `GET /v1/sync/pull?after=<serverSeq>&limit=<1..500>` →
   `{events: [{serverSeq, eventId, deviceId, type, aggregateType, aggregateId, payload, createdAtUtc, receivedAt}], hasMore, lastServerSeq}`.
   Incluye los eventos del propio dispositivo (el cliente los ignora por

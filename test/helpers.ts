@@ -145,7 +145,7 @@ export function saleCreatedEvent() {
         shiftId: randomUUID(),
         totalCents: 13000,
         channel: 'instagram',
-        userId: 'user-ana',
+        userId: null,
         createdAtUtc: '2026-08-20T18:00:00.000Z',
       },
       items: [
@@ -162,3 +162,119 @@ export function saleCreatedEvent() {
     },
   };
 }
+
+// --- Fábricas para las reglas del árbitro (Fase 4) -------------------------
+
+const at = '2026-08-20T15:00:00.000Z';
+
+/// Sobre de evento con la forma del outbox.
+export function envelope(
+  type: string,
+  aggregateType: string,
+  aggregateId: string,
+  row: Record<string, unknown>,
+) {
+  return {
+    eventId: randomUUID(),
+    type,
+    aggregateType,
+    aggregateId,
+    createdAtUtc: at,
+    payload: { v: 1, ...row },
+  };
+}
+
+export function userCreated(role: string, id = randomUUID(), isActive = true) {
+  return envelope('user.created', 'user', id, {
+    id,
+    displayName: role,
+    role,
+    pinHash: 'h',
+    pinSalt: 's',
+    isActive,
+    createdAtUtc: at,
+    updatedAtUtc: at,
+    version: 1,
+  });
+}
+
+export function shiftRow(id: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    deviceId: 'd',
+    branchId: 'b',
+    openedAtUtc: at,
+    openedBusinessDate: '2026-08-20',
+    startingCashCents: 100000,
+    status: 'open',
+    openedByUserId: null,
+    closedByUserId: null,
+    version: 1,
+    ...extra,
+  };
+}
+
+export const shiftOpened = (id: string, extra: Record<string, unknown> = {}) =>
+  envelope('shift.opened', 'shift', id, shiftRow(id, extra));
+
+export const shiftClosed = (id: string, extra: Record<string, unknown> = {}) =>
+  envelope(
+    'shift.closed',
+    'shift',
+    id,
+    shiftRow(id, { status: 'closed', closingCountedCashCents: 0, version: 2, ...extra }),
+  );
+
+export function orderRow(id: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    channel: 'instagram',
+    customerName: 'Sofía',
+    status: 'pending',
+    itemsJson: '[]',
+    saleId: null,
+    createdByUserId: null,
+    deviceId: 'd',
+    shiftId: null,
+    createdAtUtc: at,
+    updatedAtUtc: at,
+    version: 1,
+    ...extra,
+  };
+}
+
+export const orderCreated = (id: string, extra: Record<string, unknown> = {}) =>
+  envelope('incoming_order.created', 'incoming_order', id, orderRow(id, extra));
+
+export const orderCancelled = (id: string, extra: Record<string, unknown> = {}) =>
+  envelope(
+    'incoming_order.cancelled',
+    'incoming_order',
+    id,
+    orderRow(id, { status: 'cancelled', version: 2, ...extra }),
+  );
+
+/// Venta en `shiftId`; con `orderId`, cumple ese pedido.
+export function sale(
+  shiftId: string,
+  opts: { userId?: string | null; orderId?: string; orderVersion?: number } = {},
+) {
+  const id = randomUUID();
+  return envelope('sale.created', 'sale', id, {
+    sale: { id, shiftId, totalCents: 5000, userId: opts.userId ?? null },
+    items: [],
+    modifiers: [],
+    payments: [],
+    incomingOrder: opts.orderId
+      ? orderRow(opts.orderId, {
+          status: 'fulfilled',
+          saleId: id,
+          shiftId,
+          version: opts.orderVersion ?? 2,
+        })
+      : null,
+  });
+}
+
+export const productUpserted = (id: string, version: number, name: string) =>
+  envelope('product.upserted', 'product', id, { id, name, basePriceCents: 5000, version });

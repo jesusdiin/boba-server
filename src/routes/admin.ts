@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
+import { rebuildProjections } from '../sync/rules.js';
 import { newPairingCode, normalizePairingCode, sha256 } from '../tokens.js';
 
 export const PAIRING_CODE_TTL_MS = 15 * 60 * 1000;
@@ -77,6 +78,14 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
     // Corta su socket de tiempo real (cierre 4401: no reconecta).
     notifier.disconnectDevice(device.id);
     res.json(revoked);
+  });
+
+  /// Reconstruye las proyecciones desde el log (datos previos a la Fase 4 o
+  /// tras un cambio en las reglas de proyección).
+  router.post('/projections/rebuild', async (req, res) => {
+    const branchId = z.uuid().optional().parse(req.body?.branchId);
+    const events = await rebuildProjections(db, branchId);
+    res.json({ events });
   });
 
   return router;
