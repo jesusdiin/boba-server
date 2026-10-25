@@ -34,6 +34,30 @@ describe('GET /v1/sync/pull', () => {
     });
   });
 
+  it('un dispositivo nuevo baja toda la sucursal desde cero (≥ 1,000 eventos)', async () => {
+    const { token, branchId } = await t.pairedDevice();
+    const pushed = Array.from({ length: 1203 }, () => userUpdatedEvent());
+    for (let i = 0; i < pushed.length; i += 500) {
+      const res = await t.push(token, pushed.slice(i, i + 500));
+      expect(res.status).toBe(200);
+    }
+
+    const fresh = await t.pairAnother(branchId, 'iPad nuevo');
+    const seen: string[] = [];
+    let after = '0';
+    let pages = 0;
+    for (;;) {
+      const res = await t.pull(fresh.token, { after, limit: 500 });
+      seen.push(...res.body.events.map((e: { eventId: string }) => e.eventId));
+      after = res.body.lastServerSeq;
+      pages++;
+      if (!res.body.hasMore) break;
+    }
+
+    expect(pages).toBe(3);
+    expect(seen).toEqual(pushed.map((e) => e.eventId));
+  });
+
   it('devuelve el sobre completo y quién lo subió', async () => {
     const { token, deviceId } = await t.pairedDevice();
     const event = userUpdatedEvent();

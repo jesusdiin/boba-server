@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import { pino } from 'pino';
 import request from 'supertest';
@@ -6,6 +8,8 @@ import { afterAll, beforeEach } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import { createDb } from '../src/db.js';
+import { InProcessBranchNotifier } from '../src/realtime/branchNotifier.js';
+import { attachRealtime } from '../src/realtime/wsServer.js';
 import { PairingThrottle } from '../src/routes/devices.js';
 
 export const ADMIN_KEY = process.env.ADMIN_API_KEY ?? '';
@@ -13,19 +17,40 @@ export const ADMIN_KEY = process.env.ADMIN_API_KEY ?? '';
 /// App + DB de pruebas; las tablas se vacían antes de cada test.
 export function setupTestApp() {
   const db = createDb(process.env.DATABASE_URL ?? '');
+  const logger = pino({ level: 'silent' });
+  const notifier = new InProcessBranchNotifier();
   const app = createApp({
     db,
     adminApiKey: ADMIN_KEY,
-    logger: pino({ level: 'silent' }),
+    logger,
     pairingThrottle: new PairingThrottle(1000),
+    notifier,
   });
+
+  // Servidor HTTP real (puerto efímero) solo para los tests de WebSocket.
+  let server: Server | undefined;
+  let realtime: { close: () => void } | undefined;
+  async function listen(heartbeatMs = 30_000): Promise<string> {
+    if (!server) {
+      const s = app.listen(0);
+      await new Promise<void>((resolve) => s.once('listening', () => resolve()));
+      server = s;
+      realtime = attachRealtime(s, { db, notifier, logger, heartbeatMs });
+    }
+    const { port } = server.address() as AddressInfo;
+    return `ws://127.0.0.1:${port}/v1/ws`;
+  }
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
       'TRUNCATE events, device_pairing_codes, devices, branches, organizations RESTART IDENTITY CASCADE',
     );
   });
-  afterAll(() => db.$disconnect());
+  afterAll(async () => {
+    realtime?.close();
+    await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
+    await db.$disconnect();
+  });
 
   const admin = () => ({
     post: (path: string, body?: object) =>
@@ -76,7 +101,7 @@ export function setupTestApp() {
       .set('authorization', `Bearer ${token}`)
       .query(query);
 
-  return { app, db, admin, pairedDevice, pairAnother, push, pull };
+  return { app, db, notifier, listen, admin, pairedDevice, pairAnother, push, pull };
 }
 
 /// Evento con la forma del outbox de la app (docs/EVENTOS.md).

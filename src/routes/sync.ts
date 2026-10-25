@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireDevice } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
+import type { BranchNotifier } from '../realtime/branchNotifier.js';
 import {
   eventRejection,
   MAX_PUSH_BATCH,
@@ -26,7 +27,7 @@ type Rejected = { eventId: string | null; code: string; message: string };
 const userIdOf = (payload: Record<string, unknown>): string | null =>
   typeof payload.userId === 'string' ? payload.userId : null;
 
-export function syncRouter(db: Db): Router {
+export function syncRouter(db: Db, notifier: BranchNotifier): Router {
   const router = Router();
 
   /// Sube un lote de eventos del outbox. Idempotente por `eventId`: un
@@ -103,6 +104,10 @@ export function syncRouter(db: Db): Router {
           });
       }
     });
+
+    // Aviso a los demás dispositivos de la sucursal (después del commit).
+    const last = accepted.at(-1);
+    if (last) notifier.notify(device.branchId, BigInt(last.serverSeq));
 
     res.json({ accepted, duplicates, rejected });
   });

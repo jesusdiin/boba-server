@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
+import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
 import { newPairingCode, normalizePairingCode, sha256 } from '../tokens.js';
 
 export const PAIRING_CODE_TTL_MS = 15 * 60 * 1000;
@@ -16,7 +17,7 @@ const NewBranch = z.object({
 
 /// Alta de organizaciones, sucursales y códigos de emparejamiento. Protegido
 /// con `adminAuth` (el panel del dueño llegará después).
-export function adminRouter(db: Db): Router {
+export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Router {
   const router = Router();
 
   router.post('/organizations', async (req, res) => {
@@ -73,6 +74,8 @@ export function adminRouter(db: Db): Router {
       data: { revokedAt: device.revokedAt ?? new Date() },
       select: { id: true, revokedAt: true },
     });
+    // Corta su socket de tiempo real (cierre 4401: no reconecta).
+    notifier.disconnectDevice(device.id);
     res.json(revoked);
   });
 

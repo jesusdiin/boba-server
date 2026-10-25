@@ -77,6 +77,22 @@ Organización, sucursal y dispositivo salen **solo** del token.
   Incluye los eventos del propio dispositivo (el cliente los ignora por
   `deviceId`). `serverSeq` viaja como string.
 
+### Tiempo real — `GET /v1/ws` (WebSocket)
+Upgrade con `Authorization: Bearer <token>` (401 si es inválido o revocado).
+Solo avisos, nunca datos de negocio (los datos se bajan con el pull):
+
+- `{"type": "hello", "branchId": "…", "upTo": "123"}` al conectar.
+- `{"type": "events", "upTo": "130"}` tras cada push aceptado de la sucursal.
+- Revocar el dispositivo cierra el socket con código **4401**.
+- Ping cada 30 s; un socket sin pong se cierra.
+
+El reparto es en memoria (`InProcessBranchNotifier`): sirve con una sola
+instancia del servidor.
+
+```bash
+websocat -H "Authorization: Bearer $TOKEN" ws://localhost:4000/v1/ws
+```
+
 ### Salud
 `GET /healthz` → `{ok: true}` (verifica la DB).
 
@@ -92,6 +108,31 @@ curl -s -X POST localhost:4000/v1/sync/push -H "authorization: Bearer $TOKEN" \
   -d '{"events":[{"eventId":"0192f0a0-0000-7000-8000-000000000001","type":"sale.created","aggregateType":"sale","aggregateId":"s1","createdAtUtc":"2026-08-20T18:00:00.000Z","payload":{"v":1,"sale":{"id":"s1"}}}]}'
 
 curl -s "localhost:4000/v1/sync/pull?after=0" -H "authorization: Bearer $TOKEN"
+```
+
+## Conectar la app
+
+```bash
+pnpm cli org:create "Boba & Co."
+pnpm cli branch:create <orgId> "Sucursal Centro"
+pnpm cli pair-code <branchId>        # un código por dispositivo
+```
+
+- **macOS / simulador**: `flutter run -d macos --dart-define=BOBA_SERVER_URL=http://localhost:4000`.
+- **iPad físico**: la app debe llegar al Mac por la LAN:
+  `flutter run -d <ipad> --dart-define=BOBA_SERVER_URL=http://<ip-del-mac>:4000`
+  (la IP sale de `ipconfig getifaddr en0`). El servidor escucha en todas las
+  interfaces; iOS pide permiso de "red local" la primera vez.
+- En la app: menú del admin → **Conectar a sucursal** (el primer dispositivo
+  sube su menú, insumos y usuarios) o, en un iPad nuevo, **Unirme a una
+  sucursal existente** desde la configuración inicial.
+
+Prueba de punta a punta (app ↔ este servidor, con Postgres):
+
+```bash
+cd ../boba_pos
+BOBA_E2E_URL=http://localhost:4000 BOBA_E2E_ADMIN_KEY=<ADMIN_API_KEY> \
+  flutter test test/e2e/server_e2e_test.dart
 ```
 
 ## Agregar un tipo de evento
