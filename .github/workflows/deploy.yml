@@ -1,0 +1,65 @@
+name: Deploy boba-server
+
+on:
+  push:
+    branches:
+      - deploy
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          port: ${{ secrets.VPS_PORT }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+
+            APP_DIR="${{ secrets.APP_DIR }}"
+            PM2_NAME="${{ secrets.PM2_NAME }}"
+            PORT="${{ secrets.APP_PORT }}"
+
+            echo "==> Changing to app directory: $APP_DIR"
+            cd "$APP_DIR"
+
+            echo "==> Pulling latest changes"
+            git fetch --all
+            git reset --hard origin/deploy
+
+            echo "==> Installing dependencies"
+            pnpm install --frozen-lockfile
+
+            echo "==> Generating Prisma client"
+            pnpm prisma generate
+
+            echo "==> Running Prisma migrations"
+            pnpm db:deploy
+
+            echo "==> Building"
+            pnpm build
+
+            echo "==> Restarting with PM2"
+            pm2 restart "$PM2_NAME" || pm2 start dist/src/server.js --name "$PM2_NAME" --interpreter node
+
+            echo "==> Saving PM2 process list"
+            pm2 save
+
+            echo "==> Waiting for server to start..."
+            sleep 5
+
+            echo "==> Healthcheck"
+            if curl -f "http://127.0.0.1:${PORT}/" > /dev/null 2>&1; then
+              echo "Healthcheck passed"
+            else
+              echo "Healthcheck failed or endpoint doesn't exist, checking process status..."
+              pm2 status "$PM2_NAME"
+              exit 1
+            fi
+
+            echo "==> Deployment completed successfully"
