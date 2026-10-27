@@ -29,6 +29,17 @@ const obj = (v: unknown): Payload | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null;
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+const int = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null;
+const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
+const date = (v: unknown): Date | null => {
+  const value = str(v);
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+const rows = (v: unknown): Payload[] =>
+  Array.isArray(v) ? v.map(obj).filter((row): row is Payload => row !== null) : [];
 
 /// La fila tal como la guarda la app (el payload sin `v`).
 function rowOf(payload: Payload): Payload {
@@ -37,7 +48,7 @@ function rowOf(payload: Payload): Payload {
   return row;
 }
 
-async function stateOf(tx: Tx, branchId: string, aggregateType: string, id: string) {
+export async function stateOf(tx: Tx, branchId: string, aggregateType: string, id: string) {
   return tx.aggregateState.findUnique({
     where: {
       branchId_aggregateType_aggregateId: { branchId, aggregateType, aggregateId: id },
@@ -74,6 +85,16 @@ async function rewriteShiftIds(tx: Tx, branchId: string, type: string, p: Payloa
   }
 }
 
+/// Pedido nuevo hecho por el cliente en el kiosco: sin usuario del staff.
+function isKioskOrder(type: string, p: Payload): boolean {
+  return (
+    type === 'incoming_order.created' &&
+    p.channel === 'kiosk' &&
+    p.status === 'pending' &&
+    (p.createdByUserId === null || p.createdByUserId === undefined)
+  );
+}
+
 const reject = (
   code: string,
   message: string,
@@ -90,6 +111,22 @@ export async function applyRules(
 ): Promise<RuleResult> {
   const branchId = device.branchId;
   const payload = structuredClone(event.payload) as Payload;
+
+  // Modo del dispositivo: siempre sobre el dispositivo del token (el
+  // `deviceId` del payload es informativo). Va en el outbox, así que llega en
+  // orden respecto a lo que el dispositivo registró antes y después.
+  if (event.type === 'device.mode_changed') {
+    if (payload.mode !== 'staff' && payload.mode !== 'kiosk') {
+      return reject('invalid_event', 'Modo inválido');
+    }
+    await tx.device.update({ where: { id: device.id }, data: { mode: payload.mode } });
+    device.mode = payload.mode;
+    return { ok: true, payload };
+  }
+  // Un kiosco (en manos del cliente) solo puede enviar pedidos de kiosco.
+  if (device.mode === 'kiosk' && !isKioskOrder(event.type, payload)) {
+    return reject('kiosk_forbidden', 'Un dispositivo en modo kiosco solo envía pedidos');
+  }
   await rewriteShiftIds(tx, branchId, event.type, payload);
 
   // Permisos por rol del actor (si el evento lo trae).
@@ -207,6 +244,404 @@ export async function applyRules(
   return { ok: true, payload };
 }
 
+const json = (row: Payload): Prisma.InputJsonValue => row as Prisma.InputJsonValue;
+const versionOf = (row: Payload): number => int(row.version) ?? 0;
+
+/// Proyecciones de reportes: se guardan la fila original (`row`) y algunas
+/// columnas extraídas. Un payload incompleto no debe tumbar el push; las
+/// columnas que falten quedan en `null`.
+async function projectCategory(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    name: str(row.name),
+    sortOrder: int(row.sortOrder),
+    isActive: bool(row.isActive),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchCategory.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectProduct(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    categoryId: str(row.categoryId),
+    name: str(row.name),
+    basePriceCents: int(row.basePriceCents),
+    sortOrder: int(row.sortOrder),
+    isActive: bool(row.isActive),
+    imagePath: str(row.imagePath),
+    badge: str(row.badge),
+    isSoldOut: bool(row.isSoldOut),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchProduct.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectModifierGroup(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    name: str(row.name),
+    minSelect: int(row.minSelect),
+    maxSelect: int(row.maxSelect),
+    sortOrder: int(row.sortOrder),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchModifierGroup.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectModifierOption(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    modifierGroupId: str(row.modifierGroupId),
+    name: str(row.name),
+    priceDeltaCents: int(row.priceDeltaCents),
+    sortOrder: int(row.sortOrder),
+    isActive: bool(row.isActive),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchModifierOption.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectProductModifierGroup(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+) {
+  const productId = str(row.productId);
+  const modifierGroupId = str(row.modifierGroupId);
+  if (!productId || !modifierGroupId) return;
+  const data = {
+    sortOrder: int(row.sortOrder),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchProductModifierGroup.upsert({
+    where: {
+      branchId_productId_modifierGroupId: { branchId, productId, modifierGroupId },
+    },
+    create: { branchId, productId, modifierGroupId, ...data },
+    update: data,
+  });
+}
+
+async function projectSupply(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    name: str(row.name),
+    category: str(row.category),
+    unit: str(row.unit),
+    supplierName: str(row.supplierName),
+    leadTimeHours: int(row.leadTimeHours),
+    minQuantityMilli: int(row.minQuantityMilli),
+    unitCostCents: int(row.unitCostCents),
+    sortOrder: int(row.sortOrder),
+    isActive: bool(row.isActive),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchSupply.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectUser(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    displayName: str(row.displayName),
+    role: str(row.role),
+    isActive: bool(row.isActive),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchUser.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectShift(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    deviceId: str(row.deviceId),
+    openedAtUtc: date(row.openedAtUtc),
+    openedBusinessDate: str(row.openedBusinessDate),
+    startingCashCents: int(row.startingCashCents),
+    closedAtUtc: date(row.closedAtUtc),
+    closedBusinessDate: str(row.closedBusinessDate),
+    closingCountedCashCents: int(row.closingCountedCashCents),
+    closingExpectedCashCents: int(row.closingExpectedCashCents),
+    status: str(row.status),
+    openedByUserId: str(row.openedByUserId),
+    closedByUserId: str(row.closedByUserId),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchShift.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectSale(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    shiftId: str(row.shiftId),
+    deviceId: str(row.deviceId),
+    businessDate: str(row.businessDate),
+    subtotalCents: int(row.subtotalCents),
+    discountCents: int(row.discountCents),
+    taxCents: int(row.taxCents),
+    totalCents: int(row.totalCents),
+    currencyCode: str(row.currencyCode),
+    channel: str(row.channel),
+    userId: str(row.userId),
+    createdAtUtc: date(row.createdAtUtc),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchSale.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectSaleItem(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+) {
+  const id = str(row.id);
+  const saleId = str(row.saleId);
+  if (!id || !saleId) return;
+  const data = {
+    saleId,
+    productId: str(row.productId),
+    productNameSnapshot: str(row.productNameSnapshot),
+    unitPriceCentsSnapshot: int(row.unitPriceCentsSnapshot),
+    quantity: int(row.quantity),
+    lineTotalCents: int(row.lineTotalCents),
+    createdAtUtc: date(row.createdAtUtc),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchSaleItem.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectSaleItemModifier(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+) {
+  const id = str(row.id);
+  const saleItemId = str(row.saleItemId);
+  if (!id || !saleItemId) return;
+  const data = {
+    saleItemId,
+    modifierOptionId: str(row.modifierOptionId),
+    modifierGroupNameSnapshot: str(row.modifierGroupNameSnapshot),
+    modifierOptionNameSnapshot: str(row.modifierOptionNameSnapshot),
+    priceDeltaCentsSnapshot: int(row.priceDeltaCentsSnapshot),
+    createdAtUtc: date(row.createdAtUtc),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchSaleItemModifier.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectPayment(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+) {
+  const id = str(row.id);
+  const saleId = str(row.saleId);
+  if (!id || !saleId) return;
+  const data = {
+    saleId,
+    method: str(row.method),
+    amountCents: int(row.amountCents),
+    tenderedCents: int(row.tenderedCents),
+    changeCents: int(row.changeCents),
+    createdAtUtc: date(row.createdAtUtc),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchPayment.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectCashMovement(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    shiftId: str(row.shiftId),
+    deviceId: str(row.deviceId),
+    businessDate: str(row.businessDate),
+    kind: str(row.kind),
+    category: str(row.category),
+    concept: str(row.concept),
+    amountCents: int(row.amountCents),
+    counterparty: str(row.counterparty),
+    userId: str(row.userId),
+    createdAtUtc: date(row.createdAtUtc),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchCashMovement.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectSupplyMovement(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    supplyId: str(row.supplyId) ?? '',
+    kind: str(row.kind),
+    quantityDeltaMilli: int(row.quantityDeltaMilli),
+    unitCostCents: int(row.unitCostCents),
+    note: str(row.note),
+    userId: str(row.userId),
+    shiftId: str(row.shiftId),
+    deviceId: str(row.deviceId),
+    businessDate: str(row.businessDate),
+    createdAtUtc: date(row.createdAtUtc),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchSupplyMovement.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
+async function projectIncomingOrder(
+  tx: Tx,
+  branchId: string,
+  seq: bigint,
+  row: Payload,
+  id: string,
+) {
+  const data = {
+    channel: str(row.channel),
+    customerName: str(row.customerName),
+    pickupAtUtc: date(row.pickupAtUtc),
+    status: str(row.status),
+    saleId: str(row.saleId),
+    deviceId: str(row.deviceId),
+    shiftId: str(row.shiftId),
+    createdByUserId: str(row.createdByUserId),
+    createdAtUtc: date(row.createdAtUtc),
+    updatedAtUtc: date(row.updatedAtUtc),
+    version: versionOf(row),
+    row: json(row),
+    lastServerSeq: seq,
+  };
+  await tx.branchIncomingOrder.upsert({
+    where: { branchId_id: { branchId, id } },
+    create: { branchId, id, ...data },
+    update: data,
+  });
+}
+
 /// Actualiza las proyecciones con un evento ya guardado (también la usa
 /// [rebuildProjections]).
 export async function project(
@@ -221,7 +656,7 @@ export async function project(
     const data = {
       version: num(row.version),
       status: str(aggregateType === 'user' ? row.role : row.status),
-      row: row as Prisma.InputJsonValue,
+      row: json(row),
       lastServerSeq: serverSeq,
     };
     await tx.aggregateState.upsert({
@@ -233,25 +668,99 @@ export async function project(
     });
   };
 
+  const row = rowOf(payload);
+  const id = str(row.id) ?? aggregateId;
   const aggregateType = VERSIONED[type];
-  if (aggregateType) return upsert(aggregateType, aggregateId, rowOf(payload));
-  if (type === 'sale.created') {
-    const order = obj(payload.incomingOrder);
-    const id = str(order?.id);
-    if (order && id) await upsert('incoming_order', id, order);
+  if (aggregateType) await upsert(aggregateType, aggregateId, row);
+
+  switch (type) {
+    case 'category.upserted':
+      await projectCategory(tx, branchId, serverSeq, row, id);
+      break;
+    case 'product.upserted':
+      await projectProduct(tx, branchId, serverSeq, row, id);
+      break;
+    case 'modifier_group.upserted':
+      await projectModifierGroup(tx, branchId, serverSeq, row, id);
+      break;
+    case 'modifier_option.upserted':
+      await projectModifierOption(tx, branchId, serverSeq, row, id);
+      break;
+    case 'product_modifier_group.upserted':
+      await projectProductModifierGroup(tx, branchId, serverSeq, row);
+      break;
+    case 'supply.upserted':
+      await projectSupply(tx, branchId, serverSeq, row, id);
+      break;
+    case 'user.created':
+    case 'user.updated':
+      await projectUser(tx, branchId, serverSeq, row, id);
+      break;
+    case 'shift.opened':
+    case 'shift.closed':
+      await projectShift(tx, branchId, serverSeq, row, id);
+      break;
+    case 'incoming_order.created':
+    case 'incoming_order.cancelled':
+      await projectIncomingOrder(tx, branchId, serverSeq, row, id);
+      break;
+    case 'sale.created': {
+      const sale = obj(payload.sale);
+      if (sale) await projectSale(tx, branchId, serverSeq, sale, str(sale.id) ?? aggregateId);
+      for (const item of rows(payload.items)) {
+        await projectSaleItem(tx, branchId, serverSeq, item);
+      }
+      for (const modifier of rows(payload.modifiers)) {
+        await projectSaleItemModifier(tx, branchId, serverSeq, modifier);
+      }
+      for (const payment of rows(payload.payments)) {
+        await projectPayment(tx, branchId, serverSeq, payment);
+      }
+      const order = obj(payload.incomingOrder);
+      const orderId = str(order?.id);
+      if (order && orderId) {
+        await upsert('incoming_order', orderId, order);
+        await projectIncomingOrder(tx, branchId, serverSeq, order, orderId);
+      }
+      break;
+    }
+    case 'cash_movement.created':
+      await projectCashMovement(tx, branchId, serverSeq, row, id);
+      break;
+    case 'supply_movement.created':
+      await projectSupplyMovement(tx, branchId, serverSeq, row, id);
+      break;
+    case 'device.mode_changed':
+      break;
   }
 }
 
-/// Reconstruye `aggregate_state` desde `events` (sin arbitrar: los eventos
+/// Reconstruye las proyecciones desde `events` (sin arbitrar: los eventos
 /// guardados ya pasaron las reglas). Los alias de turno no se reconstruyen:
 /// son decisiones del árbitro, no derivables del log.
 export async function rebuildProjections(
   db: { $transaction: <T>(fn: (tx: Tx) => Promise<T>, opts?: { timeout?: number }) => Promise<T> },
   branchId?: string,
 ): Promise<number> {
+  const where = branchId ? { branchId } : {};
   return db.$transaction(
     async (tx) => {
-      await tx.aggregateState.deleteMany({ where: branchId ? { branchId } : {} });
+      await tx.aggregateState.deleteMany({ where });
+      await tx.branchCategory.deleteMany({ where });
+      await tx.branchProduct.deleteMany({ where });
+      await tx.branchModifierGroup.deleteMany({ where });
+      await tx.branchModifierOption.deleteMany({ where });
+      await tx.branchProductModifierGroup.deleteMany({ where });
+      await tx.branchSupply.deleteMany({ where });
+      await tx.branchUser.deleteMany({ where });
+      await tx.branchShift.deleteMany({ where });
+      await tx.branchSale.deleteMany({ where });
+      await tx.branchSaleItem.deleteMany({ where });
+      await tx.branchSaleItemModifier.deleteMany({ where });
+      await tx.branchPayment.deleteMany({ where });
+      await tx.branchCashMovement.deleteMany({ where });
+      await tx.branchSupplyMovement.deleteMany({ where });
+      await tx.branchIncomingOrder.deleteMany({ where });
       let count = 0;
       let after = 0n;
       for (;;) {

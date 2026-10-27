@@ -3,12 +3,13 @@ import { z } from 'zod';
 /// Tipos y versión vigente del payload; espejo de `EventTypes` en la app
 /// (boba_pos/lib/core/sync/event_types.dart, docs/EVENTOS.md).
 export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
-  'sale.created': 1,
+  // v2: `channel` puede ser `kiosk` (Fase 5); misma forma que v1.
+  'sale.created': 2,
   'cash_movement.created': 1,
   'supply_movement.created': 1,
   'supply.upserted': 1,
-  'incoming_order.created': 1,
-  'incoming_order.cancelled': 1,
+  'incoming_order.created': 2,
+  'incoming_order.cancelled': 2,
   'user.created': 1,
   'user.updated': 1,
   'shift.opened': 1,
@@ -18,6 +19,7 @@ export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
   'modifier_group.upserted': 1,
   'modifier_option.upserted': 1,
   'product_modifier_group.upserted': 1,
+  'device.mode_changed': 1,
 };
 
 export const MAX_PUSH_BATCH = 500;

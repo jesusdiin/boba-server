@@ -3,7 +3,8 @@ import { z } from 'zod';
 
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
-import { newDeviceToken, normalizePairingCode, sha256 } from '../tokens.js';
+import { createDevice, pairResponse } from '../pairing.js';
+import { normalizePairingCode, sha256 } from '../tokens.js';
 
 const PairBody = z.object({
   code: z.string().min(1),
@@ -52,7 +53,6 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
     throttle.ensureAllowed(ip);
     const body = PairBody.parse(req.body);
     const codeHash = sha256(normalizePairingCode(body.code));
-    const token = newDeviceToken();
 
     const result = await db.$transaction(async (tx) => {
       const code = await tx.devicePairingCode.findUnique({
@@ -60,14 +60,11 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
         include: { branch: true },
       });
       if (!code || code.usedAt || code.expiresAt <= new Date()) return null;
-      const device = await tx.device.create({
-        data: {
-          organizationId: code.branch.organizationId,
-          branchId: code.branchId,
-          name: body.deviceName,
-          mode: body.mode,
-          tokenHash: sha256(token),
-        },
+      const { device, token } = await createDevice(tx, {
+        organizationId: code.branch.organizationId,
+        branchId: code.branchId,
+        name: body.deviceName,
+        mode: body.mode,
       });
       // `usedAt: null` en el where: si dos dispositivos canjean a la vez,
       // solo uno actualiza y el otro aborta la transacción.
@@ -77,7 +74,7 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
       });
       if (claimed.count !== 1)
         throw new HttpError(409, 'code_already_used', 'Código ya usado');
-      return { device, branch: code.branch };
+      return pairResponse(device, code.branch, token);
     });
 
     if (!result) {
@@ -85,17 +82,7 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
       throw new HttpError(400, 'invalid_code', 'Código inválido, usado o vencido');
     }
 
-    res.status(201).json({
-      deviceId: result.device.id,
-      token,
-      organizationId: result.device.organizationId,
-      branch: {
-        id: result.branch.id,
-        name: result.branch.name,
-        timezoneId: result.branch.timezoneId,
-        currencyCode: result.branch.currencyCode,
-      },
-    });
+    res.status(201).json(result);
   });
 
   return router;

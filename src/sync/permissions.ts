@@ -10,7 +10,8 @@ export type Permission =
   | 'inventoryEntries'
   | 'inventoryAdjust'
   | 'dashboard'
-  | 'manageUsers';
+  | 'manageUsers'
+  | 'manageDevices';
 
 const CASHIER: ReadonlySet<Permission> = new Set([
   'sell',

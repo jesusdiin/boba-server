@@ -10,6 +10,8 @@ export interface DeviceContext {
   id: string;
   organizationId: string;
   branchId: string;
+  /// Modo vigente; cambia dentro de un push con `device.mode_changed`.
+  mode: 'staff' | 'kiosk';
 }
 
 declare global {
@@ -42,6 +44,7 @@ export async function resolveDevice(
     id: device.id,
     organizationId: device.organizationId,
     branchId: device.branchId,
+    mode: device.mode,
   };
 }
 

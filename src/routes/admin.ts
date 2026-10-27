@@ -5,9 +5,7 @@ import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
 import { rebuildProjections } from '../sync/rules.js';
-import { newPairingCode, normalizePairingCode, sha256 } from '../tokens.js';
-
-export const PAIRING_CODE_TTL_MS = 15 * 60 * 1000;
+import { createPairingCode } from '../pairing.js';
 
 const NewOrganization = z.object({ name: z.string().trim().min(1) });
 const NewBranch = z.object({
@@ -39,15 +37,7 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
   router.post('/branches/:branchId/pairing-codes', async (req, res) => {
     const branch = await db.branch.findUnique({ where: { id: req.params.branchId } });
     if (!branch) throw notFound('Sucursal no encontrada');
-    const code = newPairingCode();
-    const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS);
-    await db.devicePairingCode.create({
-      data: {
-        branchId: branch.id,
-        codeHash: sha256(normalizePairingCode(code)),
-        expiresAt,
-      },
-    });
+    const { code, expiresAt } = await createPairingCode(db, branch.id);
     res.status(201).json({ code, expiresAt, branchId: branch.id });
   });
 

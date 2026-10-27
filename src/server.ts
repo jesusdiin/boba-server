@@ -10,7 +10,13 @@ const env = loadEnv();
 const logger = pino({ level: env.LOG_LEVEL });
 const db = createDb(env.DATABASE_URL);
 const notifier = new InProcessBranchNotifier();
-const app = createApp({ db, adminApiKey: env.ADMIN_API_KEY, logger, notifier });
+const app = createApp({
+  db,
+  adminApiKey: env.ADMIN_API_KEY,
+  logger,
+  notifier,
+  signupEnabled: env.SIGNUP_ENABLED,
+});
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT }, 'boba-server escuchando');

@@ -24,6 +24,7 @@ export function setupTestApp() {
     adminApiKey: ADMIN_KEY,
     logger,
     pairingThrottle: new PairingThrottle(1000),
+    signupThrottle: new PairingThrottle(1000),
     notifier,
   });
 
@@ -43,7 +44,12 @@ export function setupTestApp() {
 
   beforeEach(async () => {
     await db.$executeRawUnsafe(
-      'TRUNCATE events, device_pairing_codes, devices, branches, organizations RESTART IDENTITY CASCADE',
+      'TRUNCATE branch_sale_item_modifiers, branch_sale_items, branch_payments, ' +
+        'branch_sales, branch_cash_movements, branch_supply_movements, branch_shifts, ' +
+        'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
+        'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
+        'branch_supplies, branch_users, events, device_pairing_codes, devices, ' +
+        'branches, organizations RESTART IDENTITY CASCADE',
     );
   });
   afterAll(async () => {
@@ -101,7 +107,48 @@ export function setupTestApp() {
       .set('authorization', `Bearer ${token}`)
       .query(query);
 
-  return { app, db, notifier, listen, admin, pairedDevice, pairAnother, push, pull };
+  const snapshot = (token: string, branchId: string) =>
+    request(app)
+      .get(`/v1/branches/${branchId}/snapshot`)
+      .set('authorization', `Bearer ${token}`);
+
+  /// Negocio nuevo desde la app (`POST /v1/signup`).
+  const signup = (body: Record<string, unknown> = {}) =>
+    request(app)
+      .post('/v1/signup')
+      .send({
+        organizationName: 'Boba & Co.',
+        branchName: 'Principal',
+        deviceName: 'iPad caja',
+        ...body,
+      });
+
+  /// Rutas `/v1/branch` como el dispositivo `token` con la sesión `userId`.
+  const branch = (token: string, userId?: string) => {
+    const auth = (r: request.Test) => {
+      r.set('authorization', `Bearer ${token}`);
+      return userId ? r.set('x-boba-user', userId) : r;
+    };
+    return {
+      post: (path: string) => auth(request(app).post(`/v1/branch${path}`)),
+      get: (path: string) => auth(request(app).get(`/v1/branch${path}`)),
+    };
+  };
+
+  return {
+    app,
+    db,
+    notifier,
+    listen,
+    admin,
+    pairedDevice,
+    pairAnother,
+    push,
+    pull,
+    snapshot,
+    signup,
+    branch,
+  };
 }
 
 /// Evento con la forma del outbox de la app (docs/EVENTOS.md).
@@ -132,32 +179,67 @@ export function userUpdatedEvent(
 
 export function saleCreatedEvent() {
   const saleId = randomUUID();
+  const shiftId = randomUUID();
+  const itemId = randomUUID();
+  const at = '2026-08-20T18:00:00.000Z';
   return {
     eventId: randomUUID(),
     type: 'sale.created',
     aggregateType: 'sale',
     aggregateId: saleId,
-    createdAtUtc: '2026-08-20T18:00:00.000Z',
+    createdAtUtc: at,
     payload: {
       v: 1,
       sale: {
         id: saleId,
-        shiftId: randomUUID(),
+        shiftId,
+        deviceId: randomUUID(),
+        branchId: randomUUID(),
+        businessDate: '2026-08-20',
+        subtotalCents: 13000,
+        discountCents: 0,
+        taxCents: 0,
         totalCents: 13000,
+        currencyCode: 'MXN',
         channel: 'instagram',
         userId: null,
-        createdAtUtc: '2026-08-20T18:00:00.000Z',
+        createdAtUtc: at,
+        updatedAtUtc: at,
       },
       items: [
         {
-          id: randomUUID(),
+          id: itemId,
           saleId,
+          productId: randomUUID(),
           productNameSnapshot: 'Brown Sugar Boba',
+          unitPriceCentsSnapshot: 6500,
           quantity: 2,
+          lineTotalCents: 13000,
+          createdAtUtc: at,
         },
       ],
-      modifiers: [],
-      payments: [{ id: randomUUID(), saleId, method: 'card', amountCents: 13000 }],
+      modifiers: [
+        {
+          id: randomUUID(),
+          saleItemId: itemId,
+          modifierOptionId: randomUUID(),
+          modifierGroupNameSnapshot: 'Sabor',
+          modifierOptionNameSnapshot: 'Moka',
+          priceDeltaCentsSnapshot: 1000,
+          createdAtUtc: at,
+        },
+      ],
+      payments: [
+        {
+          id: randomUUID(),
+          saleId,
+          method: 'card',
+          amountCents: 13000,
+          tenderedCents: 13000,
+          changeCents: 0,
+          createdAtUtc: at,
+        },
+      ],
       incomingOrder: null,
     },
   };
@@ -261,7 +343,22 @@ export function sale(
 ) {
   const id = randomUUID();
   return envelope('sale.created', 'sale', id, {
-    sale: { id, shiftId, totalCents: 5000, userId: opts.userId ?? null },
+    sale: {
+      id,
+      shiftId,
+      deviceId: 'd',
+      branchId: 'b',
+      businessDate: '2026-08-20',
+      subtotalCents: 5000,
+      discountCents: 0,
+      taxCents: 0,
+      totalCents: 5000,
+      currencyCode: 'MXN',
+      channel: 'instagram',
+      userId: opts.userId ?? null,
+      createdAtUtc: at,
+      updatedAtUtc: at,
+    },
     items: [],
     modifiers: [],
     payments: [],

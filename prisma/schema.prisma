@@ -41,6 +41,22 @@ model Branch {
   shiftAliases ShiftAlias[]
   conflicts    SyncConflict[]
 
+  projectionCategories            BranchCategory[]
+  projectionProducts              BranchProduct[]
+  projectionModifierGroups        BranchModifierGroup[]
+  projectionModifierOptions       BranchModifierOption[]
+  projectionProductModifierGroups BranchProductModifierGroup[]
+  projectionSupplies              BranchSupply[]
+  projectionUsers                 BranchUser[]
+  projectionShifts                BranchShift[]
+  projectionSales                 BranchSale[]
+  projectionSaleItems             BranchSaleItem[]
+  projectionSaleItemModifiers     BranchSaleItemModifier[]
+  projectionPayments              BranchPayment[]
+  projectionCashMovements         BranchCashMovement[]
+  projectionSupplyMovements       BranchSupplyMovement[]
+  projectionIncomingOrders        BranchIncomingOrder[]
+
   @@index([organizationId])
   @@map("branches")
 }
@@ -164,4 +180,327 @@ model SyncConflict {
 
   @@index([branchId, createdAt])
   @@map("sync_conflicts")
+}
+
+// --- Proyecciones de reportes y snapshot -----------------------------------
+//
+// Cada fila guarda el estado exacto que manda la app en `row` (camelCase,
+// fechas ISO-UTC) y columnas extraídas para reportes. Son reconstruibles desde
+// `events` con `rebuildProjections`. `aggregate_state` sigue siendo el estado
+// de arbitraje; estas tablas no participan en las reglas.
+
+model BranchCategory {
+  branchId      String   @map("branch_id") @db.Uuid
+  id            String
+  name          String?
+  sortOrder     Int?     @map("sort_order")
+  isActive      Boolean? @map("is_active")
+  version       Int      @default(0)
+  row           Json     @db.JsonB
+  lastServerSeq BigInt   @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, sortOrder])
+  @@map("branch_categories")
+}
+
+model BranchProduct {
+  branchId       String   @map("branch_id") @db.Uuid
+  id             String
+  categoryId     String?  @map("category_id")
+  name           String?
+  basePriceCents Int?     @map("base_price_cents")
+  sortOrder      Int?     @map("sort_order")
+  isActive       Boolean? @map("is_active")
+  imagePath      String?  @map("image_path")
+  badge          String?
+  isSoldOut      Boolean? @map("is_sold_out")
+  version        Int      @default(0)
+  row            Json     @db.JsonB
+  lastServerSeq  BigInt   @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, categoryId, sortOrder])
+  @@map("branch_products")
+}
+
+model BranchModifierGroup {
+  branchId      String  @map("branch_id") @db.Uuid
+  id            String
+  name          String?
+  minSelect     Int?    @map("min_select")
+  maxSelect     Int?    @map("max_select")
+  sortOrder     Int?    @map("sort_order")
+  version       Int     @default(0)
+  row           Json    @db.JsonB
+  lastServerSeq BigInt  @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, sortOrder])
+  @@map("branch_modifier_groups")
+}
+
+model BranchModifierOption {
+  branchId        String   @map("branch_id") @db.Uuid
+  id              String
+  modifierGroupId String?  @map("modifier_group_id")
+  name            String?
+  priceDeltaCents Int?     @map("price_delta_cents")
+  sortOrder       Int?     @map("sort_order")
+  isActive        Boolean? @map("is_active")
+  version         Int      @default(0)
+  row             Json     @db.JsonB
+  lastServerSeq   BigInt   @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, modifierGroupId, sortOrder])
+  @@map("branch_modifier_options")
+}
+
+model BranchProductModifierGroup {
+  branchId        String @map("branch_id") @db.Uuid
+  productId       String @map("product_id")
+  modifierGroupId String @map("modifier_group_id")
+  sortOrder       Int?   @map("sort_order")
+  row             Json   @db.JsonB
+  lastServerSeq   BigInt @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, productId, modifierGroupId])
+  @@index([branchId, modifierGroupId])
+  @@map("branch_product_modifier_groups")
+}
+
+model BranchSupply {
+  branchId         String   @map("branch_id") @db.Uuid
+  id               String
+  name             String?
+  category         String?
+  unit             String?
+  supplierName     String?  @map("supplier_name")
+  leadTimeHours    Int?     @map("lead_time_hours")
+  minQuantityMilli Int?     @map("min_quantity_milli")
+  unitCostCents    Int?     @map("unit_cost_cents")
+  sortOrder        Int?     @map("sort_order")
+  isActive         Boolean? @map("is_active")
+  version          Int      @default(0)
+  row              Json     @db.JsonB
+  lastServerSeq    BigInt   @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, category, sortOrder])
+  @@map("branch_supplies")
+}
+
+model BranchUser {
+  branchId      String   @map("branch_id") @db.Uuid
+  id            String
+  displayName   String?  @map("display_name")
+  role          String?
+  isActive      Boolean? @map("is_active")
+  version       Int      @default(0)
+  row           Json     @db.JsonB
+  lastServerSeq BigInt   @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, role, isActive])
+  @@map("branch_users")
+}
+
+model BranchShift {
+  branchId                 String    @map("branch_id") @db.Uuid
+  id                       String
+  deviceId                 String?   @map("device_id")
+  openedAtUtc              DateTime? @map("opened_at_utc") @db.Timestamptz(3)
+  openedBusinessDate       String?   @map("opened_business_date")
+  startingCashCents        Int?      @map("starting_cash_cents")
+  closedAtUtc              DateTime? @map("closed_at_utc") @db.Timestamptz(3)
+  closedBusinessDate       String?   @map("closed_business_date")
+  closingCountedCashCents  Int?      @map("closing_counted_cash_cents")
+  closingExpectedCashCents Int?      @map("closing_expected_cash_cents")
+  status                   String?
+  openedByUserId           String?   @map("opened_by_user_id")
+  closedByUserId           String?   @map("closed_by_user_id")
+  version                  Int       @default(0)
+  row                      Json      @db.JsonB
+  lastServerSeq            BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, status])
+  @@index([branchId, openedBusinessDate])
+  @@map("branch_shifts")
+}
+
+model BranchSale {
+  branchId      String    @map("branch_id") @db.Uuid
+  id            String
+  shiftId       String?   @map("shift_id")
+  deviceId      String?   @map("device_id")
+  businessDate  String?   @map("business_date")
+  subtotalCents Int?      @map("subtotal_cents")
+  discountCents Int?      @map("discount_cents")
+  taxCents      Int?      @map("tax_cents")
+  totalCents    Int?      @map("total_cents")
+  currencyCode  String?   @map("currency_code")
+  channel       String?
+  userId        String?   @map("user_id")
+  createdAtUtc  DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  row           Json      @db.JsonB
+  lastServerSeq BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, businessDate])
+  @@index([branchId, shiftId])
+  @@index([branchId, createdAtUtc])
+  @@map("branch_sales")
+}
+
+model BranchSaleItem {
+  branchId               String    @map("branch_id") @db.Uuid
+  id                     String
+  saleId                 String    @map("sale_id")
+  productId              String?   @map("product_id")
+  productNameSnapshot    String?   @map("product_name_snapshot")
+  unitPriceCentsSnapshot Int?      @map("unit_price_cents_snapshot")
+  quantity               Int?
+  lineTotalCents         Int?      @map("line_total_cents")
+  createdAtUtc           DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  row                    Json      @db.JsonB
+  lastServerSeq          BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, saleId])
+  @@index([branchId, productId])
+  @@map("branch_sale_items")
+}
+
+model BranchSaleItemModifier {
+  branchId                   String    @map("branch_id") @db.Uuid
+  id                         String
+  saleItemId                 String    @map("sale_item_id")
+  modifierOptionId           String?   @map("modifier_option_id")
+  modifierGroupNameSnapshot  String?   @map("modifier_group_name_snapshot")
+  modifierOptionNameSnapshot String?   @map("modifier_option_name_snapshot")
+  priceDeltaCentsSnapshot    Int?      @map("price_delta_cents_snapshot")
+  createdAtUtc               DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  row                        Json      @db.JsonB
+  lastServerSeq              BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, saleItemId])
+  @@map("branch_sale_item_modifiers")
+}
+
+model BranchPayment {
+  branchId      String    @map("branch_id") @db.Uuid
+  id            String
+  saleId        String    @map("sale_id")
+  method        String?
+  amountCents   Int?      @map("amount_cents")
+  tenderedCents Int?      @map("tendered_cents")
+  changeCents   Int?      @map("change_cents")
+  createdAtUtc  DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  row           Json      @db.JsonB
+  lastServerSeq BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, saleId])
+  @@index([branchId, method])
+  @@map("branch_payments")
+}
+
+model BranchCashMovement {
+  branchId      String    @map("branch_id") @db.Uuid
+  id            String
+  shiftId       String?   @map("shift_id")
+  deviceId      String?   @map("device_id")
+  businessDate  String?   @map("business_date")
+  kind          String?
+  category      String?
+  concept       String?
+  amountCents   Int?      @map("amount_cents")
+  counterparty  String?
+  userId        String?   @map("user_id")
+  createdAtUtc  DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  row           Json      @db.JsonB
+  lastServerSeq BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, businessDate])
+  @@index([branchId, shiftId])
+  @@map("branch_cash_movements")
+}
+
+model BranchSupplyMovement {
+  branchId           String    @map("branch_id") @db.Uuid
+  id                 String
+  supplyId           String    @map("supply_id")
+  kind               String?
+  quantityDeltaMilli Int?      @map("quantity_delta_milli")
+  unitCostCents      Int?      @map("unit_cost_cents")
+  note               String?
+  userId             String?   @map("user_id")
+  shiftId            String?   @map("shift_id")
+  deviceId           String?   @map("device_id")
+  businessDate       String?   @map("business_date")
+  createdAtUtc       DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  row                Json      @db.JsonB
+  lastServerSeq      BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, supplyId])
+  @@index([branchId, businessDate])
+  @@map("branch_supply_movements")
+}
+
+model BranchIncomingOrder {
+  branchId        String    @map("branch_id") @db.Uuid
+  id              String
+  channel         String?
+  customerName    String?   @map("customer_name")
+  pickupAtUtc     DateTime? @map("pickup_at_utc") @db.Timestamptz(3)
+  status          String?
+  saleId          String?   @map("sale_id")
+  deviceId        String?   @map("device_id")
+  shiftId         String?   @map("shift_id")
+  createdByUserId String?   @map("created_by_user_id")
+  createdAtUtc    DateTime? @map("created_at_utc") @db.Timestamptz(3)
+  updatedAtUtc    DateTime? @map("updated_at_utc") @db.Timestamptz(3)
+  version         Int       @default(0)
+  row             Json      @db.JsonB
+  lastServerSeq   BigInt    @map("last_server_seq")
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@id([branchId, id])
+  @@index([branchId, status])
+  @@index([branchId, createdAtUtc])
+  @@map("branch_incoming_orders")
 }
