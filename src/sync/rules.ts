@@ -369,6 +369,16 @@ async function projectProductModifierGroup(
   });
 }
 
+/// Quitar un grupo de un producto: borra la unión (idempotente).
+async function removeProductModifierGroup(tx: Tx, branchId: string, row: Payload) {
+  const productId = str(row.productId);
+  const modifierGroupId = str(row.modifierGroupId);
+  if (!productId || !modifierGroupId) return;
+  await tx.branchProductModifierGroup.deleteMany({
+    where: { branchId, productId, modifierGroupId },
+  });
+}
+
 async function projectSupply(
   tx: Tx,
   branchId: string,
@@ -688,6 +698,9 @@ export async function project(
       break;
     case 'product_modifier_group.upserted':
       await projectProductModifierGroup(tx, branchId, serverSeq, row);
+      break;
+    case 'product_modifier_group.removed':
+      await removeProductModifierGroup(tx, branchId, row);
       break;
     case 'supply.upserted':
       await projectSupply(tx, branchId, serverSeq, row, id);

@@ -11,7 +11,9 @@ export type Permission =
   | 'inventoryAdjust'
   | 'dashboard'
   | 'manageUsers'
-  | 'manageDevices';
+  | 'manageDevices'
+  | 'manageCatalog'
+  | 'markSoldOut';
 
 const CASHIER: ReadonlySet<Permission> = new Set([
   'sell',
@@ -21,6 +23,7 @@ const CASHIER: ReadonlySet<Permission> = new Set([
   'expenses',
   'inventoryView',
   'inventoryEntries',
+  'markSoldOut',
 ]);
 
 export function roleCan(role: string, permission: Permission): boolean {

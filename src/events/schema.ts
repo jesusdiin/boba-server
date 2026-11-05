@@ -19,6 +19,7 @@ export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
   'modifier_group.upserted': 1,
   'modifier_option.upserted': 1,
   'product_modifier_group.upserted': 1,
+  'product_modifier_group.removed': 1,
   'device.mode_changed': 1,
 };
 
