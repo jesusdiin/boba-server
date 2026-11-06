@@ -79,6 +79,8 @@ async function rewriteShiftIds(tx: Tx, branchId: string, type: string, p: Payloa
     case 'sale.created':
       await fix(obj(p.sale));
       await fix(obj(p.incomingOrder));
+      // v3: el consumo de insumos va en el mismo turno que la venta.
+      for (const movement of rows(p.supplyMovements)) await fix(movement);
       return;
     case 'cash_movement.created':
     case 'supply_movement.created':
@@ -740,6 +742,13 @@ export async function project(
       }
       for (const payment of rows(payload.payments)) {
         await projectPayment(tx, branchId, serverSeq, payment);
+      }
+      // v3: consumo de insumos según las recetas (movimientos `sale`).
+      for (const movement of rows(payload.supplyMovements)) {
+        const movementId = str(movement.id);
+        if (movementId) {
+          await projectSupplyMovement(tx, branchId, serverSeq, movement, movementId);
+        }
       }
       const order = obj(payload.incomingOrder);
       const orderId = str(order?.id);

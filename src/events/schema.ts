@@ -4,7 +4,8 @@ import { z } from 'zod';
 /// (boba_pos/lib/core/sync/event_types.dart, docs/EVENTOS.md).
 export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
   // v2: `channel` puede ser `kiosk` (Fase 5); misma forma que v1.
-  'sale.created': 2,
+  // v3: trae `supplyMovements` (consumo de insumos por recetas).
+  'sale.created': 3,
   'cash_movement.created': 1,
   'supply_movement.created': 1,
   'supply.upserted': 1,
