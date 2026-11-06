@@ -29,6 +29,9 @@ const VERSIONED: Readonly<Record<string, string>> = {
 /// Temas de la app (`AppThemeId` en boba_pos/lib/core/theme/app_themes.dart).
 const THEMES: ReadonlySet<string> = new Set(['boba', 'minimal', 'dark']);
 
+/// Tipografías (`AppFontId` en boba_pos/lib/core/theme/app_fonts.dart).
+const FONTS: ReadonlySet<string> = new Set(['classic', 'editorial', 'modern']);
+
 const obj = (v: unknown): Payload | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null;
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
@@ -137,6 +140,10 @@ export async function applyRules(
   if (event.type === 'branch.theme_set') {
     if (!THEMES.has(String(payload.theme)) || typeof payload.automatic !== 'boolean') {
       return reject('invalid_event', 'Tema inválido');
+    }
+    // `font` es opcional (null = la tipografía del tema).
+    if (payload.font != null && !FONTS.has(String(payload.font))) {
+      return reject('invalid_event', 'Tipografía inválida');
     }
   }
   await rewriteShiftIds(tx, branchId, event.type, payload);

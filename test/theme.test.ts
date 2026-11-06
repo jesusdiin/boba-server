@@ -36,6 +36,15 @@ describe('branch.theme_set (tema de la sucursal)', () => {
     expect((await t.snapshot(token, branchId)).body.branchTheme).toBeNull();
   });
 
+  it('acepta una tipografía conocida y rechaza una desconocida', async () => {
+    const { token, branchId } = await t.pairedDevice();
+    const at = '2026-11-05T15:00:00.000Z';
+    const ok = await t.push(token, [themeSet(branchId, 'minimal', at, { font: 'modern' })]);
+    expect(ok.body.accepted).toHaveLength(1);
+    const bad = await t.push(token, [themeSet(branchId, 'minimal', at, { font: 'comic' })]);
+    expect(bad.body.rejected[0]).toMatchObject({ code: 'invalid_event' });
+  });
+
   it('rechaza un tema desconocido', async () => {
     const { token, branchId } = await t.pairedDevice();
     const res = await t.push(token, [themeSet(branchId, 'neon', '2026-11-05T15:00:00.000Z')]);
