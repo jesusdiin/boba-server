@@ -22,6 +22,11 @@ describe('letra de folio por equipo', () => {
     };
     const b = await pair('iPad kiosco');
     expect(b.folioPrefix).toBe('B');
+    // El equipo que se une recibe el nombre del negocio.
+    expect((b as unknown as { organizationName: string }).organizationName).toBe(
+      (a as unknown as { organizationName: string }).organizationName,
+    );
+    expect((a as unknown as { organizationName: string }).organizationName).toBeTruthy();
 
     // Una letra no se reutiliza aunque el equipo se desconecte.
     const list = (await t.branch(a.token, admin.aggregateId).get('/devices')).body.devices as {

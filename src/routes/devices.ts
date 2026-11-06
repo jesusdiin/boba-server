@@ -57,7 +57,7 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
     const result = await db.$transaction(async (tx) => {
       const code = await tx.devicePairingCode.findUnique({
         where: { codeHash },
-        include: { branch: true },
+        include: { branch: { include: { organization: true } } },
       });
       if (!code || code.usedAt || code.expiresAt <= new Date()) return null;
       const { device, token } = await createDevice(tx, {
@@ -74,7 +74,7 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
       });
       if (claimed.count !== 1)
         throw new HttpError(409, 'code_already_used', 'Código ya usado');
-      return pairResponse(device, code.branch, token);
+      return pairResponse(device, code.branch, token, code.branch.organization.name);
     });
 
     if (!result) {

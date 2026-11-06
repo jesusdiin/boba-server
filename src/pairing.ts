@@ -49,9 +49,16 @@ export function folioPrefixFor(index: number): string {
 }
 
 /// Respuesta de `/v1/devices/pair` y `/v1/signup`.
-export function pairResponse(device: Device, branch: Branch, token: string) {
+export function pairResponse(
+  device: Device,
+  branch: Branch,
+  token: string,
+  organizationName: string,
+) {
   return {
     deviceId: device.id,
+    /// Nombre del negocio: la app lo muestra en lugar de la marca por defecto.
+    organizationName,
     folioPrefix: device.folioPrefix,
     token,
     organizationId: device.organizationId,

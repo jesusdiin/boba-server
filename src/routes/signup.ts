@@ -51,7 +51,7 @@ export function signupRouter(
         name: body.deviceName,
         mode: 'staff',
       });
-      return pairResponse(device, branch, token);
+      return pairResponse(device, branch, token, org.name);
     });
 
     res.status(201).json(result);
