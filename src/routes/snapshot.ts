@@ -130,6 +130,14 @@ export function snapshotRouter(db: Db): Router {
           }),
         ]);
 
+        // El tema de la sucursal no es una proyección: es el último
+        // `branch.theme_set` (la app se queda con el más reciente).
+        const theme = await tx.event.findFirst({
+          where: { branchId, type: 'branch.theme_set' },
+          orderBy: { serverSeq: 'desc' },
+          select: { payload: true },
+        });
+
         const tables = {
           categories: rowsOf(categories),
           products: rowsOf(products),
@@ -150,7 +158,13 @@ export function snapshotRouter(db: Db): Router {
 
         // Si hay eventos pero ninguna proyección, falta el backfill. Mejor
         // que el POS caiga al pull completo a que restaure una sucursal vacía.
-        if (serverSeq > 0n && Object.values(tables).every((rows) => rows.length === 0)) {
+        // Solo cuentan eventos que proyectan filas (no tema ni modo).
+        const projectable =
+          serverSeq > 0n &&
+          (await tx.event.count({
+            where: { branchId, type: { notIn: ['branch.theme_set', 'device.mode_changed'] } },
+          })) > 0;
+        if (projectable && Object.values(tables).every((rows) => rows.length === 0)) {
           throw new HttpError(
             409,
             'snapshot_not_ready',
@@ -164,6 +178,7 @@ export function snapshotRouter(db: Db): Router {
           serverSeq: serverSeq.toString(),
           generatedAt: new Date().toISOString(),
           tables,
+          branchTheme: theme?.payload ?? null,
         };
       },
       { isolationLevel: 'RepeatableRead' },

@@ -12,6 +12,8 @@ export interface DeviceContext {
   branchId: string;
   /// Modo vigente; cambia dentro de un push con `device.mode_changed`.
   mode: 'staff' | 'kiosk';
+  /// Letra de folio del equipo (se devuelve en el pull).
+  folioPrefix: string;
 }
 
 declare global {
@@ -45,6 +47,7 @@ export async function resolveDevice(
     organizationId: device.organizationId,
     branchId: device.branchId,
     mode: device.mode,
+    folioPrefix: device.folioPrefix,
   };
 }
 

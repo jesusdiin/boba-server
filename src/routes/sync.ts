@@ -163,6 +163,8 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
       })),
       hasMore: rows.length > limit,
       lastServerSeq: (last?.serverSeq ?? after).toString(),
+      // Letra de folio del equipo del token (los ya vinculados la reciben aquí).
+      folioPrefix: device.folioPrefix,
     });
   });
 

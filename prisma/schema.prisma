@@ -74,6 +74,9 @@ model Device {
   branchId       String     @map("branch_id") @db.Uuid
   name           String
   mode           DeviceMode @default(staff)
+  /// Letra de folio del equipo en su sucursal (A, B… Z, AA…). Nunca se
+  /// reutiliza, ni la de un equipo desconectado.
+  folioPrefix    String     @map("folio_prefix")
   /// sha256 del token; el token en claro solo se entrega al emparejar.
   tokenHash      String     @unique @map("token_hash")
   lastSeenAt     DateTime?  @map("last_seen_at") @db.Timestamptz(3)
@@ -85,6 +88,7 @@ model Device {
   events       Event[]
 
   @@index([branchId])
+  @@unique([branchId, folioPrefix])
   @@map("devices")
 }
 

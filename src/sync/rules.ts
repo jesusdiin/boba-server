@@ -21,9 +21,13 @@ const VERSIONED: Readonly<Record<string, string>> = {
   'user.updated': 'user',
   'incoming_order.created': 'incoming_order',
   'incoming_order.cancelled': 'incoming_order',
+  'incoming_order.prep_changed': 'incoming_order',
   'shift.opened': 'shift',
   'shift.closed': 'shift',
 };
+
+/// Temas de la app (`AppThemeId` en boba_pos/lib/core/theme/app_themes.dart).
+const THEMES: ReadonlySet<string> = new Set(['boba', 'minimal', 'dark']);
 
 const obj = (v: unknown): Payload | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null;
@@ -80,6 +84,7 @@ async function rewriteShiftIds(tx: Tx, branchId: string, type: string, p: Payloa
     case 'supply_movement.created':
     case 'incoming_order.created':
     case 'incoming_order.cancelled':
+    case 'incoming_order.prep_changed':
       await fix(p);
       return;
   }
@@ -126,6 +131,11 @@ export async function applyRules(
   // Un kiosco (en manos del cliente) solo puede enviar pedidos de kiosco.
   if (device.mode === 'kiosk' && !isKioskOrder(event.type, payload)) {
     return reject('kiosk_forbidden', 'Un dispositivo en modo kiosco solo envía pedidos');
+  }
+  if (event.type === 'branch.theme_set') {
+    if (!THEMES.has(String(payload.theme)) || typeof payload.automatic !== 'boolean') {
+      return reject('invalid_event', 'Tema inválido');
+    }
   }
   await rewriteShiftIds(tx, branchId, event.type, payload);
 
@@ -189,7 +199,8 @@ export async function applyRules(
       }
       break;
     }
-    case 'incoming_order.cancelled': {
+    case 'incoming_order.cancelled':
+    case 'incoming_order.prep_changed': {
       const current = await stateOf(tx, branchId, 'incoming_order', event.aggregateId);
       if (current?.status === 'fulfilled' || current?.status === 'cancelled') {
         return reject('invalid_transition', `El pedido ya estaba ${current.status}`, {
@@ -715,6 +726,7 @@ export async function project(
       break;
     case 'incoming_order.created':
     case 'incoming_order.cancelled':
+    case 'incoming_order.prep_changed':
       await projectIncomingOrder(tx, branchId, serverSeq, row, id);
       break;
     case 'sale.created': {
@@ -744,6 +756,7 @@ export async function project(
       await projectSupplyMovement(tx, branchId, serverSeq, row, id);
       break;
     case 'device.mode_changed':
+    case 'branch.theme_set':
       break;
   }
 }

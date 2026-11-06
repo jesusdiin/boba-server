@@ -53,6 +53,7 @@ export function branchRouter(db: Db, notifier: BranchNotifier = noopNotifier): R
         id: true,
         name: true,
         mode: true,
+        folioPrefix: true,
         lastSeenAt: true,
         revokedAt: true,
         createdAt: true,

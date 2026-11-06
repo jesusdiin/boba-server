@@ -10,6 +10,7 @@ export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
   'supply.upserted': 1,
   'incoming_order.created': 2,
   'incoming_order.cancelled': 2,
+  'incoming_order.prep_changed': 1,
   'user.created': 1,
   'user.updated': 1,
   'shift.opened': 1,
@@ -21,6 +22,7 @@ export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
   'product_modifier_group.upserted': 1,
   'product_modifier_group.removed': 1,
   'device.mode_changed': 1,
+  'branch.theme_set': 1,
 };
 
 export const MAX_PUSH_BATCH = 500;
