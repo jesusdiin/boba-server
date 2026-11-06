@@ -31,6 +31,13 @@ model Branch {
   name           String
   timezoneId     String   @default("America/Mexico_City") @map("timezone_id")
   currencyCode   String   @default("MXN") @map("currency_code")
+  /// Contacto (`branch.details_set`), para el ticket y el kiosco.
+  address        String?
+  phone          String?
+  whatsapp       String?
+  instagram      String?
+  /// `setAtUtc` del último `branch.details_set` aplicado (gana el más nuevo).
+  detailsSetAt   DateTime? @map("details_set_at") @db.Timestamptz(3)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   organization Organization        @relation(fields: [organizationId], references: [id])

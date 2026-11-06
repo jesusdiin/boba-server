@@ -24,6 +24,7 @@ export const EVENT_SCHEMA_VERSIONS: Readonly<Record<string, number>> = {
   'product_modifier_group.removed': 1,
   'device.mode_changed': 1,
   'branch.theme_set': 1,
+  'branch.details_set': 1,
 };
 
 export const MAX_PUSH_BATCH = 500;

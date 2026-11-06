@@ -137,6 +137,18 @@ export async function applyRules(
   if (device.mode === 'kiosk' && !isKioskOrder(event.type, payload)) {
     return reject('kiosk_forbidden', 'Un dispositivo en modo kiosco solo envía pedidos');
   }
+  if (event.type === 'branch.details_set') {
+    const name = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.length <= 80;
+    const optional = (v: unknown) => v == null || (typeof v === 'string' && v.length <= 200);
+    if (
+      !name(payload.businessName) ||
+      !name(payload.branchName) ||
+      !['address', 'phone', 'whatsapp', 'instagram'].every((k) => optional(payload[k])) ||
+      Number.isNaN(Date.parse(String(payload.setAtUtc)))
+    ) {
+      return reject('invalid_event', 'Datos del negocio inválidos');
+    }
+  }
   if (event.type === 'branch.theme_set') {
     if (!THEMES.has(String(payload.theme)) || typeof payload.automatic !== 'boolean') {
       return reject('invalid_event', 'Tema inválido');
@@ -771,10 +783,37 @@ export async function project(
     case 'supply_movement.created':
       await projectSupplyMovement(tx, branchId, serverSeq, row, id);
       break;
+    case 'branch.details_set':
+      await projectBranchDetails(tx, branchId, payload);
+      break;
     case 'device.mode_changed':
     case 'branch.theme_set':
       break;
   }
+}
+
+/// Nombre del negocio y datos de la sucursal: solo si es más nuevo que lo
+/// aplicado (los equipos pueden subir fuera de orden).
+async function projectBranchDetails(tx: Tx, branchId: string, p: Payload) {
+  const setAt = new Date(String(p.setAtUtc));
+  const branch = await tx.branch.findUnique({ where: { id: branchId } });
+  if (!branch || (branch.detailsSetAt && setAt <= branch.detailsSetAt)) return;
+  const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  await tx.branch.update({
+    where: { id: branchId },
+    data: {
+      name: String(p.branchName).trim(),
+      address: text(p.address),
+      phone: text(p.phone),
+      whatsapp: text(p.whatsapp),
+      instagram: text(p.instagram),
+      detailsSetAt: setAt,
+    },
+  });
+  await tx.organization.update({
+    where: { id: branch.organizationId },
+    data: { name: String(p.businessName).trim() },
+  });
 }
 
 /// Reconstruye las proyecciones desde `events` (sin arbitrar: los eventos

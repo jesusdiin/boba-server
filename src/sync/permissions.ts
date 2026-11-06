@@ -14,7 +14,8 @@ export type Permission =
   | 'manageDevices'
   | 'manageCatalog'
   | 'markSoldOut'
-  | 'manageAppearance';
+  | 'manageAppearance'
+  | 'manageBusiness';
 
 const CASHIER: ReadonlySet<Permission> = new Set([
   'sell',
@@ -75,6 +76,8 @@ export function actorAndPermission(
       return { actor: str(payload.createdByUserId), permission: 'takeOrders' };
     case 'branch.theme_set':
       return { actor: str(payload.userId), permission: 'manageAppearance' };
+    case 'branch.details_set':
+      return { actor: str(payload.userId), permission: 'manageBusiness' };
     default:
       return null;
   }

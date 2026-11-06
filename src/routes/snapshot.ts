@@ -138,6 +138,24 @@ export function snapshotRouter(db: Db): Router {
           select: { payload: true },
         });
 
+        // Nombres y contacto: lo vigente (el `branch.details_set` más nuevo
+        // por `setAtUtc`, ya aplicado a la sucursal y la empresa).
+        const branchRow = await tx.branch.findUnique({
+          where: { id: branchId },
+          include: { organization: true },
+        });
+        const details = branchRow?.detailsSetAt
+          ? {
+              businessName: branchRow.organization.name,
+              branchName: branchRow.name,
+              address: branchRow.address,
+              phone: branchRow.phone,
+              whatsapp: branchRow.whatsapp,
+              instagram: branchRow.instagram,
+              setAtUtc: branchRow.detailsSetAt.toISOString(),
+            }
+          : null;
+
         const tables = {
           categories: rowsOf(categories),
           products: rowsOf(products),
@@ -162,7 +180,7 @@ export function snapshotRouter(db: Db): Router {
         const projectable =
           serverSeq > 0n &&
           (await tx.event.count({
-            where: { branchId, type: { notIn: ['branch.theme_set', 'device.mode_changed'] } },
+            where: { branchId, type: { notIn: ['branch.theme_set', 'branch.details_set', 'device.mode_changed'] } },
           })) > 0;
         if (projectable && Object.values(tables).every((rows) => rows.length === 0)) {
           throw new HttpError(
@@ -179,6 +197,7 @@ export function snapshotRouter(db: Db): Router {
           generatedAt: new Date().toISOString(),
           tables,
           branchTheme: theme?.payload ?? null,
+          branchDetails: details,
         };
       },
       { isolationLevel: 'RepeatableRead' },
