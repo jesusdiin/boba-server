@@ -48,7 +48,7 @@ export function setupTestApp() {
         'branch_sales, branch_cash_movements, branch_supply_movements, branch_shifts, ' +
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
-        'branch_supplies, branch_users, events, device_pairing_codes, devices, ' +
+        'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
         'branches, organizations RESTART IDENTITY CASCADE',
     );
   });

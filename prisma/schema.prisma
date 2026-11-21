@@ -21,8 +21,27 @@ model Organization {
   branches Branch[]
   devices  Device[]
   events   Event[]
+  media    Media[]
 
   @@map("organizations")
+}
+
+/// Foto subida desde la app (producto o sabor). Los eventos la nombran como
+/// `media:<id>`; cada equipo la baja la primera vez que la muestra. Se guarda
+/// en Postgres (no hay disco garantizado en el deploy; pesan ~80 KB).
+model Media {
+  /// Lo genera la app (UUIDv7) al tomar la foto.
+  id             String   @id @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  contentType    String   @map("content_type")
+  bytes          Bytes
+  sizeBytes      Int      @map("size_bytes")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("media")
 }
 
 model Branch {

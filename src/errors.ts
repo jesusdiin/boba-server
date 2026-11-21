@@ -33,6 +33,13 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     });
     return;
   }
+  // Cuerpo demasiado grande (express.json / express.raw).
+  if ((err as { type?: string } | null)?.type === 'entity.too.large') {
+    res.status(413).json({
+      error: { code: 'too_large', message: 'El archivo es demasiado grande' },
+    });
+    return;
+  }
   req.log?.error({ err }, 'unhandled error');
   res.status(500).json({ error: { code: 'internal', message: 'Error interno' } });
 };

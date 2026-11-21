@@ -10,6 +10,7 @@ import { noopNotifier, type BranchNotifier } from './realtime/branchNotifier.js'
 import { adminRouter } from './routes/admin.js';
 import { branchRouter } from './routes/branch.js';
 import { devicesRouter, PairingThrottle } from './routes/devices.js';
+import { mediaRouter } from './routes/media.js';
 import { signupRouter } from './routes/signup.js';
 import { snapshotRouter } from './routes/snapshot.js';
 import { syncRouter } from './routes/sync.js';
@@ -55,6 +56,7 @@ export function createApp({
   app.use('/v1/sync', deviceAuth(db), syncRouter(db, notifier));
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
   app.use('/v1/branches', deviceAuth(db), snapshotRouter(db));
+  app.use('/v1/media', deviceAuth(db), mediaRouter(db));
 
   app.use(() => {
     throw notFound('Ruta no encontrada');
