@@ -48,6 +48,14 @@ export interface AppDeps {
   accountThrottle?: PairingThrottle;
 }
 
+/// Headers con credenciales: se registran como `[Redacted]`.
+export const REDACTED_HEADERS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-admin-key"]',
+  'res.headers["set-cookie"]',
+];
+
 /// App Express sin `listen` (los tests la usan con supertest).
 export function createApp({
   db,
@@ -65,7 +73,8 @@ export function createApp({
 }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
-  app.use(pinoHttp({ logger }));
+  // Nunca al log: tokens de equipo, cookie del panel ni la llave admin.
+  app.use(pinoHttp({ logger: logger.child({}, { redact: REDACTED_HEADERS }) }));
   app.use(express.json({ limit: '5mb' }));
 
   app.get('/healthz', async (_req, res) => {
