@@ -3,9 +3,15 @@ import { z } from 'zod';
 
 import { requireDevice } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
-import { notFound } from '../errors.js';
-import { createPairingCode, ensureCanAddBranch, ensureCanAddDevice } from '../pairing.js';
-import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
+import { HttpError, notFound } from '../errors.js';
+import {
+  createPairingCode,
+  ensureCanAddBranch,
+  ensureCanAddDevice,
+  nextFolioPrefix,
+  pairResponse,
+} from '../pairing.js';
+import { CLOSE_MOVED, noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
 import { copyCatalog } from '../sync/branchSeed.js';
 import { syncOwnersInto } from '../sync/ownerReplication.js';
 import { requireBranchAdmin } from './branch.js';
@@ -93,6 +99,49 @@ export function orgRouter(db: Db, notifier: BranchNotifier = noopNotifier): Rout
       branch: { id: branch.id, name: branch.name, createdAt: branch.createdAt },
       pairingCode,
     });
+  });
+
+  /// Mueve este equipo a otra sucursal de la organización (mismo token). El
+  /// equipo debe tener su turno cerrado; la app además exige no tener nada
+  /// sin subir. Responde como el emparejamiento para que la app adopte la
+  /// sucursal nueva.
+  router.post('/devices/self/move', async (req, res) => {
+    const device = requireDevice(req.device);
+    const { branchId } = z.object({ branchId: z.uuid() }).parse(req.body);
+    if (branchId === device.branchId) {
+      throw new HttpError(409, 'same_branch', 'Este equipo ya es de esa sucursal');
+    }
+    const result = await db.$transaction(async (tx) => {
+      const target = await tx.branch.findUnique({ where: { id: branchId } });
+      if (!target || target.organizationId !== device.organizationId) {
+        throw notFound('Sucursal no encontrada');
+      }
+      const openShift = await tx.aggregateState.findFirst({
+        where: {
+          branchId: device.branchId,
+          aggregateType: 'shift',
+          status: 'open',
+          row: { path: ['deviceId'], equals: device.id },
+        },
+        select: { aggregateId: true },
+      });
+      if (openShift) {
+        throw new HttpError(409, 'open_shift', 'Cierra el turno de este equipo antes de moverlo');
+      }
+      await tx.$queryRaw`SELECT id FROM branches WHERE id = ${branchId}::uuid FOR UPDATE`;
+      const moved = await tx.device.update({
+        where: { id: device.id },
+        data: { branchId, folioPrefix: await nextFolioPrefix(tx, branchId) },
+      });
+      const org = await tx.organization.findUniqueOrThrow({
+        where: { id: device.organizationId },
+      });
+      return { moved, target, orgName: org.name };
+    });
+    // Su socket era de la otra sucursal: que reconecte.
+    notifier.disconnectDevice(device.id, CLOSE_MOVED, 'moved');
+    const token = (req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    res.json(pairResponse(result.moved, result.target, token, result.orgName));
   });
 
   router.post('/branches/:id/pairing-codes', async (req, res) => {

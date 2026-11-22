@@ -1,13 +1,15 @@
 import type { Db } from '../db.js';
 import type { BranchNotifier } from '../realtime/branchNotifier.js';
 import { derivedEventId, insertEvent } from './events.js';
-import { stateOf, type Tx } from './rules.js';
+import { branchIdsOf, stateOf, type Tx } from './rules.js';
 
 type Payload = Record<string, unknown> & { v: number };
 
 /// El Dueño es de la organización: existe en todas sus sucursales con el
-/// mismo id y PIN. Cada `user.*` de un Dueño (o que deja de serlo) aceptado
-/// en una sucursal se copia a las demás.
+/// mismo id y PIN; un usuario con `branchIds` existe en esas sucursales. Cada
+/// `user.*` de uno de ellos (o que deja de serlo) aceptado en una sucursal se
+/// copia a las demás: activo donde le toca, inactivo donde ya existía y ya
+/// no le toca.
 ///
 /// Corre después del commit del push, una transacción por sucursal destino
 /// (bloquea solo esa sucursal: no hay deadlocks entre sucursales). Los
@@ -36,8 +38,13 @@ export async function replicateToOrganization(
       let seq: bigint | null = null;
       for (const e of originals) {
         const payload = structuredClone(e.payload) as Payload;
-        // Dejó de ser Dueño: en las otras sucursales ya no entra.
-        if (payload.role !== 'owner') payload.isActive = false;
+        const belongs =
+          payload.role === 'owner' || branchIdsOf(payload.branchIds).includes(branchId);
+        if (!belongs) {
+          // Ya no le toca esta sucursal: solo se desactiva si estaba.
+          if (!(await stateOf(tx, branchId, 'user', e.aggregateId))) continue;
+          payload.isActive = false;
+        }
         seq =
           (await copyUserEvent(tx, {
             eventId: derivedEventId(e.eventId, branchId),

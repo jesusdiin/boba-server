@@ -47,6 +47,19 @@ export async function createDevice(
   return { device, token };
 }
 
+/// Primera letra de folio libre en la sucursal (un equipo que llega movido
+/// no debe repetir la de otro, ni la de uno desconectado).
+export async function nextFolioPrefix(tx: Tx, branchId: string): Promise<string> {
+  const used = new Set(
+    (await tx.device.findMany({ where: { branchId }, select: { folioPrefix: true } })).map(
+      (d) => d.folioPrefix,
+    ),
+  );
+  let i = 0;
+  while (used.has(folioPrefixFor(i))) i++;
+  return folioPrefixFor(i);
+}
+
 /// Letra de folio del equipo número [index] (0 → A, 25 → Z, 26 → AA…).
 /// Igual que la migración `device_folio_prefix`.
 export function folioPrefixFor(index: number): string {

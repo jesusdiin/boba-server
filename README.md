@@ -152,6 +152,14 @@ Solo el Dueño (`owner`) de la sucursal del token; plan vencido → `402`.
   ids y fotos, insumos sin movimientos). `403 plan_limit` sin cupo.
 - `POST /v1/org/branches/:id/pairing-codes` → `{code, expiresAt}` (404 si
   no es de la organización)
+- `POST /v1/org/devices/self/move {branchId}` → como `/v1/devices/pair`
+  (mismo token, primera letra de folio libre en la sucursal destino).
+  `409 open_shift` si este equipo tiene su turno abierto; cierra su socket
+  con `4409` (reconecta ya en la otra sucursal).
+
+**Usuarios en varias sucursales:** `branchIds` en `user.*` (solo el Dueño;
+se limita a la organización y se agrega la de origen). Se replican como el
+Dueño; donde se les quita una sucursal quedan inactivos.
 
 **Quién hizo el cambio:** `user.*`, catálogo y `supply.upserted` traen
 `actorUserId`; el árbitro valida su rol (`manageUsers` y ser Dueño para

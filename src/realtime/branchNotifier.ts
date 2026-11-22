@@ -14,13 +14,16 @@ export type RealtimeMessage =
 
 /// Cierre por dispositivo revocado (el cliente deja de reconectar).
 export const CLOSE_REVOKED = 4401;
+/// Cierre porque el equipo cambió de sucursal: el cliente reconecta (y el
+/// nuevo socket ya es de la otra sucursal).
+export const CLOSE_MOVED = 4409;
 
 /// Reparte avisos a los dispositivos conectados de cada sucursal.
 export interface BranchNotifier {
   add(connection: RealtimeConnection): void;
   remove(connection: RealtimeConnection): void;
   notify(branchId: string, upTo: bigint): void;
-  disconnectDevice(deviceId: string): void;
+  disconnectDevice(deviceId: string, code?: number, reason?: string): void;
 }
 
 /// En memoria: basta con una sola instancia del servidor. Con varias, se
@@ -47,10 +50,10 @@ export class InProcessBranchNotifier implements BranchNotifier {
     }
   }
 
-  disconnectDevice(deviceId: string): void {
+  disconnectDevice(deviceId: string, code = CLOSE_REVOKED, reason = 'revoked'): void {
     for (const set of this.byBranch.values()) {
       for (const c of set) {
-        if (c.deviceId === deviceId) c.close(CLOSE_REVOKED, 'revoked');
+        if (c.deviceId === deviceId) c.close(code, reason);
       }
     }
   }

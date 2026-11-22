@@ -172,6 +172,9 @@ export async function applyRules(
     }
   }
   await rewriteShiftIds(tx, branchId, event.type, payload);
+  if (event.type === 'user.created' || event.type === 'user.updated') {
+    await normalizeBranchIds(tx, device, event.aggregateId, payload);
+  }
 
   // Permisos por rol del actor (si el evento lo trae).
   const required = actorAndPermission(event.type, payload);
@@ -199,12 +202,19 @@ export async function applyRules(
     if (!roleCan(role, permission)) {
       return reject('forbidden', `El rol ${role} no puede ${permission}`);
     }
-    // Un Dueño solo lo crea, edita o asciende otro Dueño.
+    // Un Dueño solo lo crea, edita o asciende otro Dueño; también es el único
+    // que asigna sucursales o edita a un usuario de varias sucursales.
     if (event.type === 'user.created' || event.type === 'user.updated') {
       const target = await stateOf(tx, branchId, 'user', event.aggregateId);
       const touchesOwner = payload.role === 'owner' || target?.status === 'owner';
       if (touchesOwner && role !== 'owner') {
         return reject('forbidden', 'Solo un Dueño puede asignar o cambiar a un Dueño');
+      }
+      const before = branchIdsOf(obj(target?.row)?.branchIds);
+      const after = branchIdsOf(payload.branchIds ?? obj(target?.row)?.branchIds);
+      const multi = before.length > 1 || after.length > 1;
+      if (multi && role !== 'owner') {
+        return reject('forbidden', 'Solo un Dueño edita a un usuario de varias sucursales');
       }
     }
     // El nombre del negocio es de la organización: solo el Dueño lo cambia
@@ -323,12 +333,66 @@ export async function applyRules(
         currentType: aggregateType,
       });
     }
-    if (aggregateType === 'user' && (payload.role === 'owner' || current?.status === 'owner')) {
+    // Dueño (o deja de serlo), o usuario de varias sucursales (o deja de
+    // serlo): se copia a las demás (`ownerReplication.ts`).
+    if (
+      aggregateType === 'user' &&
+      (payload.role === 'owner' ||
+        current?.status === 'owner' ||
+        branchIdsOf(payload.branchIds).length > 1 ||
+        branchIdsOf(obj(current?.row)?.branchIds).length > 1)
+    ) {
       return { ok: true, payload, replicateToOrg: true };
     }
   }
 
   return { ok: true, payload };
+}
+
+/// Sucursales de un usuario (`branchIds`): lista de ids, o el mismo JSON en
+/// texto. Vacío = solo la sucursal donde está.
+export function branchIdsOf(value: unknown): string[] {
+  let list = value;
+  if (typeof value === 'string') {
+    try {
+      list = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string') : [];
+}
+
+/// Deja `branchIds` en sucursales de la organización, con la de origen
+/// incluida (`null` si solo es esa). Una app vieja no manda el campo: se
+/// conservan las sucursales vigentes para no quitárselas sin querer.
+async function normalizeBranchIds(
+  tx: Tx,
+  device: DeviceContext,
+  userId: string,
+  payload: Payload,
+): Promise<void> {
+  if (!('branchIds' in payload)) {
+    const current = await stateOf(tx, device.branchId, 'user', userId);
+    const kept = branchIdsOf(obj(current?.row)?.branchIds);
+    if (kept.length > 1) payload.branchIds = kept;
+    return;
+  }
+  const wanted = branchIdsOf(payload.branchIds);
+  if (wanted.length === 0) {
+    payload.branchIds = null;
+    return;
+  }
+  const ours = new Set(
+    (
+      await tx.branch.findMany({
+        where: { organizationId: device.organizationId },
+        select: { id: true },
+      })
+    ).map((b) => b.id),
+  );
+  const ids = [...new Set([device.branchId, ...wanted])].filter((id) => ours.has(id)).sort();
+  payload.branchIds = ids.length > 1 ? ids : null;
 }
 
 /// Arranque de la sucursal: ningún otro equipo ha subido eventos (registro,
