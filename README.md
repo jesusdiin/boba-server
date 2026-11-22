@@ -104,7 +104,13 @@ el último vencimiento.
    = `REVENUECAT_WEBHOOK_SECRET`.
 4. **App**: compilar con `--dart-define=REVENUECAT_GOOGLE_KEY=goog_…` (llave
    pública del SDK).
-5. **iOS (después)**: productos con los mismos ids en App Store Connect,
+
+   Cambios de plan: la app reemplaza la suscripción activa (subir inmediato
+   con prorrateo, bajar al renovar). En Play Console, deja que las
+   suscripciones `boba_pro` y `boba_max` acepten cambios de plan (es lo
+   predeterminado).
+5. **iOS (después)**: productos en App Store Connect **en un solo grupo de
+   suscripciones** (Max en el nivel más alto, así Apple maneja subir/bajar),
    Small Business Program, capacidad *In-App Purchase* en Xcode, app iOS en
    RevenueCat (mismos entitlements y offering) y
    `--dart-define=REVENUECAT_APPLE_KEY=appl_…`. Sin cambios de código.
