@@ -107,14 +107,18 @@ export async function ensureCanAddDevice(
   }
 }
 
-/// Falla si la organización ya tiene todas las sucursales de su plan.
+/// Falla si la organización no puede sumar otra sucursal: plan vencido (402)
+/// o ya tiene todas las de su plan (403 `plan_limit`).
 export async function ensureCanAddBranch(
   db: Db | Tx,
   organizationId: string,
 ): Promise<void> {
   const org = await db.organization.findUnique({ where: { id: organizationId } });
   if (!org) throw notFound('Organización no encontrada');
-  const { limits } = entitlementsOf(org, new Date());
+  const entitlements = entitlementsOf(org, new Date());
+  if (entitlements.state === 'lapsed')
+    throw subscriptionInactive(entitlements, organizationId);
+  const { limits } = entitlements;
   const used = await db.branch.count({ where: { organizationId } });
   if (used >= limits.branches) throw planLimit('branches', limits.branches, used);
 }

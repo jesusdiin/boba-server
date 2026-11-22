@@ -7,7 +7,13 @@ export type Tx = Prisma.TransactionClient;
 type Payload = Record<string, unknown>;
 
 export type RuleResult =
-  | { ok: true; payload: Payload }
+  | {
+      ok: true;
+      payload: Payload;
+      /// Evento de un Dueño (o que deja de serlo): se copia a las demás
+      /// sucursales de la organización (`ownerReplication.ts`).
+      replicateToOrg?: boolean;
+    }
   | { ok: false; code: string; message: string; details?: Record<string, unknown> };
 
 /// Tipos con `version` (last-write-wins) → tipo de agregado en la proyección.
@@ -270,6 +276,9 @@ export async function applyRules(
         current: current.row,
         currentType: aggregateType,
       });
+    }
+    if (aggregateType === 'user' && (payload.role === 'owner' || current?.status === 'owner')) {
+      return { ok: true, payload, replicateToOrg: true };
     }
   }
 

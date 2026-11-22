@@ -5,6 +5,7 @@ import { Prisma } from '../../generated/prisma/client.js';
 import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
+import { promoteAdminsToOwners } from '../sync/ownerReplication.js';
 import { rebuildProjections } from '../sync/rules.js';
 import { createPairingCode, ensureCanAddBranch } from '../pairing.js';
 import { entitlementsOf, LimitOverrides, planJson } from '../plans.js';
@@ -144,6 +145,13 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
     const branchId = z.uuid().optional().parse(req.body?.branchId);
     const events = await rebuildProjections(db, branchId);
     res.json({ events });
+  });
+
+  /// Migración al rol Dueño: los admins activos pasan a `owner` y se
+  /// replican a todas las sucursales de su organización.
+  router.post('/users/promote-admins', async (req, res) => {
+    const organizationId = z.uuid().optional().parse(req.body?.organizationId);
+    res.json(await promoteAdminsToOwners(db, notifier, organizationId));
   });
 
   return router;

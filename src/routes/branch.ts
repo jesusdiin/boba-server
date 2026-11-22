@@ -5,7 +5,7 @@ import type { Db } from '../db.js';
 import { HttpError, notFound } from '../errors.js';
 import { createPairingCode, ensureCanAddDevice } from '../pairing.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
-import { roleCan } from '../sync/permissions.js';
+import { roleCan, type Permission } from '../sync/permissions.js';
 import { stateOf } from '../sync/rules.js';
 
 const forbidden = (code: string, message: string) => new HttpError(403, code, message);
@@ -17,6 +17,7 @@ export async function requireBranchAdmin(
   db: Db,
   device: DeviceContext,
   userId: string | undefined,
+  permission: Permission = 'manageDevices',
 ): Promise<void> {
   if (device.mode === 'kiosk') {
     throw forbidden('kiosk_forbidden', 'Un kiosco no administra la sucursal');
@@ -26,8 +27,13 @@ export async function requireBranchAdmin(
   if (!user || row?.isActive === false) {
     throw forbidden('unknown_user', 'Usuario desconocido o inactivo en la sucursal');
   }
-  if (!roleCan(user.status ?? '', 'manageDevices')) {
-    throw forbidden('forbidden', `El rol ${user.status} no administra dispositivos`);
+  if (!roleCan(user.status ?? '', permission)) {
+    throw forbidden(
+      'forbidden',
+      permission === 'manageOrganization'
+        ? 'Solo el Dueño administra el negocio y sus sucursales'
+        : `El rol ${user.status} no administra dispositivos`,
+    );
   }
 }
 

@@ -13,6 +13,7 @@ import {
   billingWebhookRouter,
   type BillingConfig,
 } from './routes/billing.js';
+import { orgRouter } from './routes/org.js';
 import { branchRouter } from './routes/branch.js';
 import { devicesRouter, PairingThrottle } from './routes/devices.js';
 import { mediaRouter } from './routes/media.js';
@@ -65,6 +66,7 @@ export function createApp({
   // para poder revocar equipos y ajustarse al límite.
   app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier));
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
+  app.use('/v1/org', deviceAuth(db), requireActivePlan, orgRouter(db, notifier));
   app.use('/v1/billing', billingWebhookRouter(db, billing));
   app.use('/v1/billing', deviceAuth(db), billingDeviceRouter(db, billing));
   app.use('/v1/branches', deviceAuth(db), requireActivePlan, snapshotRouter(db));

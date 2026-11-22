@@ -49,6 +49,7 @@ pnpm cli devices <branchId>                      # dispositivos emparejados
 pnpm cli projections:rebuild [branchId]          # rehace proyecciones desde events
 pnpm cli org:show <orgId>                        # plan, estado y uso
 pnpm cli org:plan <orgId> pro active 2026-12-31  # activa/cambia el plan (fecha o "none")
+pnpm cli users:promote-admins [orgId]            # admins → Dueño (tras actualizar la app)
 ```
 
 ## API v1
@@ -123,6 +124,8 @@ el último vencimiento.
 - `POST /v1/admin/branches/:branchId/pairing-codes` → `{code, expiresAt}`
 - `GET  /v1/admin/branches/:branchId/devices`
 - `POST /v1/admin/devices/:id/revoke`
+- `POST /v1/admin/users/promote-admins {organizationId?}` → `{promoted}`:
+  los admins activos pasan a Dueño (`user.updated`) y se replican
 
 ### Registro de negocios (sin auth)
 `POST /v1/signup {organizationName, branchName, deviceName, timezoneId?, currencyCode?}`
@@ -138,6 +141,21 @@ El usuario tiene que ser admin activo de la sucursal del token (según los
 - `GET  /v1/branch/devices` → `{devices: [{id, name, mode, lastSeenAt, revokedAt, createdAt}]}`
 - `POST /v1/branch/devices/:id/revoke` → `404` si no es de la sucursal,
   `409 cannot_revoke_self` si es el propio; cierra su socket (4401)
+
+### Organización — `Authorization: Bearer <token>` + `X-Boba-User: <userId>`
+Solo el Dueño (`owner`) de la sucursal del token; plan vencido → `402`.
+- `GET  /v1/org/branches` → `{branches: [{id, name, devices, current}]}`
+- `POST /v1/org/branches {name, copyCatalog?=true}` → `{branch, pairingCode}`.
+  Crea la sucursal (zona y moneda de la de origen), le copia los Dueños y,
+  si `copyCatalog`, el catálogo vigente (`Branch*.row` → `*.upserted`, mismos
+  ids y fotos, insumos sin movimientos). `403 plan_limit` sin cupo.
+- `POST /v1/org/branches/:id/pairing-codes` → `{code, expiresAt}` (404 si
+  no es de la organización)
+
+**Roles:** `owner` puede todo; `admin` todo menos `manageOrganization`. Los
+`user.*` de un Dueño se copian tras el commit a las demás sucursales
+(`src/sync/ownerReplication.ts`): `eventId` derivado (UUIDv5, idempotente),
+mismo `deviceId`; quien deja de ser Dueño queda inactivo en las otras.
 
 ### Emparejamiento
 `POST /v1/devices/pair {code, deviceName, mode?: "staff"|"kiosk"}` →

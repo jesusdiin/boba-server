@@ -6,8 +6,9 @@ import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { planJson } from '../plans.js';
 import type { BranchNotifier } from '../realtime/branchNotifier.js';
-import { actorAndPermission } from '../sync/permissions.js';
-import { applyRules, project } from '../sync/rules.js';
+import { insertEvent } from '../sync/events.js';
+import { replicateToOrganization } from '../sync/ownerReplication.js';
+import { applyRules } from '../sync/rules.js';
 import {
   eventRejection,
   MAX_PUSH_BATCH,
@@ -31,10 +32,6 @@ type Rejected = {
   details?: Record<string, unknown>;
 };
 
-/// Actor del evento (auditoría), si lo trae.
-const userIdOf = (type: string, payload: Record<string, unknown>): string | null =>
-  actorAndPermission(type, payload)?.actor ?? null;
-
 export function syncRouter(db: Db, notifier: BranchNotifier): Router {
   const router = Router();
 
@@ -55,6 +52,8 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
     const duplicates: string[] = [];
     const rejected: Rejected[] = [];
     const valid: PushedEvent[] = [];
+    // Eventos de un Dueño: se copian a las demás sucursales tras el commit.
+    const toReplicate: { eventId: string }[] = [];
 
     for (const raw of parsedBody.data.events) {
       const parsed = PushedEvent.safeParse(raw);
@@ -112,20 +111,20 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
             });
             continue;
           }
-          const payload = verdict.payload;
-          const [row] = await tx.$queryRaw<{ server_seq: bigint }[]>`
-            INSERT INTO events (
-              event_id, organization_id, branch_id, device_id, type,
-              aggregate_type, aggregate_id, v, payload, user_id, device_created_at
-            ) VALUES (
-              ${e.eventId}::uuid, ${device.organizationId}::uuid, ${device.branchId}::uuid,
-              ${device.id}::uuid, ${e.type}, ${e.aggregateType}, ${e.aggregateId},
-              ${e.payload.v}, ${JSON.stringify(payload)}::jsonb, ${userIdOf(e.type, payload)},
-              ${new Date(e.createdAtUtc)}
-            )
-            RETURNING server_seq`;
-          await project(tx, device.branchId, e.type, e.aggregateId, payload, row!.server_seq);
-          accepted.push({ eventId: e.eventId, serverSeq: row!.server_seq.toString() });
+          const payload = verdict.payload as typeof e.payload;
+          const serverSeq = await insertEvent(tx, {
+            eventId: e.eventId,
+            organizationId: device.organizationId,
+            branchId: device.branchId,
+            deviceId: device.id,
+            type: e.type,
+            aggregateType: e.aggregateType,
+            aggregateId: e.aggregateId,
+            payload,
+            createdAt: new Date(e.createdAtUtc),
+          });
+          if (verdict.replicateToOrg) toReplicate.push({ eventId: e.eventId });
+          accepted.push({ eventId: e.eventId, serverSeq: serverSeq.toString() });
         }
       },
       { timeout: 30_000 },
@@ -134,6 +133,13 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
     // Aviso a los demás dispositivos de la sucursal (después del commit).
     const last = accepted.at(-1);
     if (last) notifier.notify(device.branchId, BigInt(last.serverSeq));
+    if (toReplicate.length > 0) {
+      // El push ya quedó guardado: si la copia falla, se registra y el
+      // equipo no ve error (las copias son idempotentes al reintentarse).
+      await replicateToOrganization(db, notifier, device.branchId, toReplicate).catch(
+        (err: unknown) => req.log.error({ err }, 'No se pudo replicar al Dueño'),
+      );
+    }
 
     res.json({ accepted, duplicates, rejected });
   });

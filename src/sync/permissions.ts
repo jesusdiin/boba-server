@@ -15,7 +15,9 @@ export type Permission =
   | 'manageCatalog'
   | 'markSoldOut'
   | 'manageAppearance'
-  | 'manageBusiness';
+  | 'manageBusiness'
+  /// Plan y pago, sucursales y nombre del negocio (solo el Dueño).
+  | 'manageOrganization';
 
 const CASHIER: ReadonlySet<Permission> = new Set([
   'sell',
@@ -30,8 +32,11 @@ const CASHIER: ReadonlySet<Permission> = new Set([
 
 export function roleCan(role: string, permission: Permission): boolean {
   switch (role) {
-    case 'admin':
+    case 'owner':
       return true;
+    // Gerente de su sucursal: todo menos lo de la organización.
+    case 'admin':
+      return permission !== 'manageOrganization';
     case 'cashier':
       return CASHIER.has(permission);
     case 'waiter':

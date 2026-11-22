@@ -8,6 +8,7 @@
  *   pnpm cli devices <branchId>
  *   pnpm cli projections:rebuild [branchId]
  *   pnpm cli org:show <orgId>
+ *   pnpm cli users:promote-admins [orgId]   (admins → Dueño; después de actualizar la app)
  *   pnpm cli org:plan <orgId> <pro|max> <trialing|active|past_due|canceled> [YYYY-MM-DD|none]
  */
 import qrcode from 'qrcode-terminal';
@@ -117,6 +118,16 @@ async function main(): Promise<void> {
         branchId: args[0],
       });
       console.log(`Proyecciones reconstruidas desde ${events} eventos`);
+      return;
+    }
+    case 'users:promote-admins': {
+      const [orgId] = args;
+      const { promoted } = await admin<{ promoted: number }>(
+        'POST',
+        '/users/promote-admins',
+        orgId ? { organizationId: orgId } : {},
+      );
+      console.log(`${promoted} admin(s) ahora son Dueño.`);
       return;
     }
     case 'org:show': {
