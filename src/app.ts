@@ -3,7 +3,7 @@ import { pinoHttp } from 'pino-http';
 import type { Logger } from 'pino';
 
 import { adminAuth } from './auth/adminAuth.js';
-import { deviceAuth } from './auth/deviceAuth.js';
+import { deviceAuth, requireActivePlan } from './auth/deviceAuth.js';
 import type { Db } from './db.js';
 import { errorHandler, notFound } from './errors.js';
 import { noopNotifier, type BranchNotifier } from './realtime/branchNotifier.js';
@@ -53,10 +53,12 @@ export function createApp({
     '/v1/signup',
     signupRouter(db, { enabled: signupEnabled, throttle: signupThrottle }),
   );
-  app.use('/v1/sync', deviceAuth(db), syncRouter(db, notifier));
+  // Plan vencido: la nube se pausa (402), pero `/v1/branch` sigue abierto
+  // para poder revocar equipos y ajustarse al límite.
+  app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier));
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
-  app.use('/v1/branches', deviceAuth(db), snapshotRouter(db));
-  app.use('/v1/media', deviceAuth(db), mediaRouter(db));
+  app.use('/v1/branches', deviceAuth(db), requireActivePlan, snapshotRouter(db));
+  app.use('/v1/media', deviceAuth(db), requireActivePlan, mediaRouter(db));
 
   app.use(() => {
     throw notFound('Ruta no encontrada');

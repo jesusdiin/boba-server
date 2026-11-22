@@ -63,13 +63,20 @@ export function setupTestApp() {
       request(app).post(`/v1/admin${path}`).set('x-admin-key', ADMIN_KEY).send(body),
     get: (path: string) =>
       request(app).get(`/v1/admin${path}`).set('x-admin-key', ADMIN_KEY),
+    patch: (path: string, body?: object) =>
+      request(app).patch(`/v1/admin${path}`).set('x-admin-key', ADMIN_KEY).send(body),
   });
 
-  /// Organización + sucursal + dispositivo emparejado; devuelve su token.
-  async function pairedDevice(opts: { orgId?: string; deviceName?: string } = {}) {
+  /// Organización + sucursal + dispositivo emparejado; devuelve su token. Las
+  /// organizaciones de prueba son Max (varias sucursales y equipos) salvo
+  /// que se pida otro plan.
+  async function pairedDevice(
+    opts: { orgId?: string; deviceName?: string; plan?: 'pro' | 'max' } = {},
+  ) {
     const orgId =
       opts.orgId ??
-      (await admin().post('/organizations', { name: 'Boba & Co.' })).body.id;
+      (await admin().post('/organizations', { name: 'Boba & Co.', plan: opts.plan ?? 'max' }))
+        .body.id;
     const branch = (
       await admin().post(`/organizations/${orgId}/branches`, { name: 'Centro' })
     ).body;

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireDevice, type DeviceContext } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
 import { HttpError, notFound } from '../errors.js';
-import { createPairingCode } from '../pairing.js';
+import { createPairingCode, ensureCanAddDevice } from '../pairing.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
 import { roleCan } from '../sync/permissions.js';
 import { stateOf } from '../sync/rules.js';
@@ -41,6 +41,8 @@ export function branchRouter(db: Db, notifier: BranchNotifier = noopNotifier): R
 
   router.post('/pairing-codes', async (req, res) => {
     const device = requireDevice(req.device);
+    // Antes de dar el código: que falle aquí y no al canjearlo en el otro equipo.
+    await ensureCanAddDevice(db, device.organizationId);
     res.status(201).json(await createPairingCode(db, device.branchId));
   });
 

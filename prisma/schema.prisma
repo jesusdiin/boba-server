@@ -13,10 +13,33 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Plan de pago (src/plans.ts). El Free es la app sin servidor.
+enum Plan {
+  pro
+  max
+
+  @@map("plan")
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+
+  @@map("subscription_status")
+}
+
 model Organization {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                 String             @id @default(uuid()) @db.Uuid
+  name               String
+  plan               Plan               @default(pro)
+  subscriptionStatus SubscriptionStatus @default(active) @map("subscription_status")
+  /// Fin del periodo pagado o de la prueba; `null` = sin vencimiento (cortesía).
+  currentPeriodEnd   DateTime?          @map("current_period_end") @db.Timestamptz(3)
+  /// Ajustes a los límites del plan (`{ branches?, devices? }`).
+  limitOverrides     Json?              @map("limit_overrides")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
 
   branches Branch[]
   devices  Device[]

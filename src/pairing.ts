@@ -1,6 +1,9 @@
 import type { Branch, Device } from '../generated/prisma/client.js';
 
+import { subscriptionInactive } from './auth/deviceAuth.js';
 import type { Db } from './db.js';
+import { HttpError, notFound } from './errors.js';
+import { entitlementsOf } from './plans.js';
 import type { Tx } from './sync/rules.js';
 import { newDeviceToken, newPairingCode, normalizePairingCode, sha256 } from './tokens.js';
 
@@ -32,7 +35,10 @@ export async function createDevice(
   },
 ): Promise<{ device: Device; token: string }> {
   const token = newDeviceToken();
-  // Bloquea la sucursal: dos altas simultáneas no pueden tomar la misma letra.
+  // Bloquea la organización (dos altas simultáneas no rebasan el límite del
+  // plan) y la sucursal (no toman la misma letra de folio).
+  await tx.$queryRaw`SELECT id FROM organizations WHERE id = ${data.organizationId}::uuid FOR UPDATE`;
+  await ensureCanAddDevice(tx, data.organizationId);
   await tx.$queryRaw`SELECT id FROM branches WHERE id = ${data.branchId}::uuid FOR UPDATE`;
   const count = await tx.device.count({ where: { branchId: data.branchId } });
   const device = await tx.device.create({
@@ -69,4 +75,45 @@ export function pairResponse(
       currencyCode: branch.currencyCode,
     },
   };
+}
+
+/// Error de límite del plan (equipos o sucursales).
+export function planLimit(
+  what: 'devices' | 'branches',
+  limit: number,
+  used: number,
+): HttpError {
+  const message =
+    what === 'devices'
+      ? `Tu plan permite ${limit} equipo${limit === 1 ? '' : 's'}; desconecta uno o mejora tu plan`
+      : `Tu plan permite ${limit} sucursal${limit === 1 ? '' : 'es'}; mejora tu plan para agregar más`;
+  return new HttpError(403, 'plan_limit', message, { limit: what, max: limit, used });
+}
+
+/// Falla si la organización no puede sumar otro equipo: plan vencido (402) o
+/// sin cupo (403 `plan_limit`). Los revocados no cuentan.
+export async function ensureCanAddDevice(
+  db: Db | Tx,
+  organizationId: string,
+): Promise<void> {
+  const org = await db.organization.findUnique({ where: { id: organizationId } });
+  if (!org) throw notFound('Organización no encontrada');
+  const entitlements = entitlementsOf(org, new Date());
+  if (entitlements.state === 'lapsed') throw subscriptionInactive(entitlements);
+  const used = await db.device.count({ where: { organizationId, revokedAt: null } });
+  if (used >= entitlements.limits.devices) {
+    throw planLimit('devices', entitlements.limits.devices, used);
+  }
+}
+
+/// Falla si la organización ya tiene todas las sucursales de su plan.
+export async function ensureCanAddBranch(
+  db: Db | Tx,
+  organizationId: string,
+): Promise<void> {
+  const org = await db.organization.findUnique({ where: { id: organizationId } });
+  if (!org) throw notFound('Organización no encontrada');
+  const { limits } = entitlementsOf(org, new Date());
+  const used = await db.branch.count({ where: { organizationId } });
+  if (used >= limits.branches) throw planLimit('branches', limits.branches, used);
 }

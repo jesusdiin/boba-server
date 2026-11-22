@@ -44,6 +44,8 @@ export function attachRealtime(
       return reject(socket, 500, 'Internal Server Error');
     }
     if (!device) return reject(socket, 401, 'Unauthorized');
+    // Plan vencido: sin tiempo real (la app sigue offline hasta reactivar).
+    if (device.entitlements.state === 'lapsed') return reject(socket, 402, 'Payment Required');
     const ctx = device;
     wss.handleUpgrade(req, socket, head, (ws) => void onConnection(ws, ctx));
   }

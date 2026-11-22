@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { createDevice, pairResponse } from '../pairing.js';
+import { trialEnd } from '../plans.js';
 import { PairingThrottle } from './devices.js';
 
 const SignupBody = z.object({
@@ -36,7 +37,15 @@ export function signupRouter(
     throttle.recordFailure(ip);
 
     const result = await db.$transaction(async (tx) => {
-      const org = await tx.organization.create({ data: { name: body.organizationName } });
+      // Todo negocio nuevo arranca con la prueba del plan Pro.
+      const org = await tx.organization.create({
+        data: {
+          name: body.organizationName,
+          plan: 'pro',
+          subscriptionStatus: 'trialing',
+          currentPeriodEnd: trialEnd(new Date()),
+        },
+      });
       const branch = await tx.branch.create({
         data: {
           organizationId: org.id,

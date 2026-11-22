@@ -1,13 +1,32 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
+import { Prisma } from '../../generated/prisma/client.js';
 import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
 import { rebuildProjections } from '../sync/rules.js';
-import { createPairingCode } from '../pairing.js';
+import { createPairingCode, ensureCanAddBranch } from '../pairing.js';
+import { entitlementsOf, LimitOverrides, planJson } from '../plans.js';
 
-const NewOrganization = z.object({ name: z.string().trim().min(1) });
+const PlanName = z.enum(['pro', 'max']);
+const Status = z.enum(['trialing', 'active', 'past_due', 'canceled']);
+
+const NewOrganization = z.object({
+  name: z.string().trim().min(1),
+  plan: PlanName.optional(),
+});
+
+/// Cambio manual del plan (cobro a mano mientras no hay pasarela).
+const PlanPatch = z
+  .object({
+    plan: PlanName,
+    subscriptionStatus: Status,
+    /// ISO 8601; `null` = sin vencimiento.
+    currentPeriodEnd: z.iso.datetime({ offset: true }).nullable(),
+    limitOverrides: LimitOverrides.nullable(),
+  })
+  .partial();
 const NewBranch = z.object({
   name: z.string().trim().min(1),
   timezoneId: z.string().min(1).optional(),
@@ -20,15 +39,60 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
   const router = Router();
 
   router.post('/organizations', async (req, res) => {
-    const { name } = NewOrganization.parse(req.body);
-    const org = await db.organization.create({ data: { name } });
+    const { name, plan } = NewOrganization.parse(req.body);
+    const org = await db.organization.create({ data: { name, plan } });
     res.status(201).json(org);
+  });
+
+  /// Plan, estado y uso (equipos activos y sucursales).
+  router.get('/organizations/:orgId', async (req, res) => {
+    const org = await db.organization.findUnique({ where: { id: req.params.orgId } });
+    if (!org) throw notFound('Organización no encontrada');
+    const [branches, devices] = await Promise.all([
+      db.branch.findMany({
+        where: { organizationId: org.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, name: true },
+      }),
+      db.device.count({ where: { organizationId: org.id, revokedAt: null } }),
+    ]);
+    res.json({
+      id: org.id,
+      name: org.name,
+      createdAt: org.createdAt,
+      plan: planJson(entitlementsOf(org, new Date())),
+      usage: { branches: branches.length, devices },
+      branches,
+    });
+  });
+
+  router.patch('/organizations/:orgId/plan', async (req, res) => {
+    const body = PlanPatch.parse(req.body);
+    const org = await db.organization.findUnique({ where: { id: req.params.orgId } });
+    if (!org) throw notFound('Organización no encontrada');
+    const updated = await db.organization.update({
+      where: { id: org.id },
+      data: {
+        plan: body.plan,
+        subscriptionStatus: body.subscriptionStatus,
+        currentPeriodEnd:
+          body.currentPeriodEnd === undefined
+            ? undefined
+            : body.currentPeriodEnd && new Date(body.currentPeriodEnd),
+        limitOverrides:
+          body.limitOverrides === undefined
+            ? undefined
+            : (body.limitOverrides ?? Prisma.DbNull),
+      },
+    });
+    res.json({ id: updated.id, plan: planJson(entitlementsOf(updated, new Date())) });
   });
 
   router.post('/organizations/:orgId/branches', async (req, res) => {
     const body = NewBranch.parse(req.body);
     const org = await db.organization.findUnique({ where: { id: req.params.orgId } });
     if (!org) throw notFound('Organización no encontrada');
+    await ensureCanAddBranch(db, org.id);
     const branch = await db.branch.create({ data: { ...body, organizationId: org.id } });
     res.status(201).json(branch);
   });

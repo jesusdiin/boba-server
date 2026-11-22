@@ -7,6 +7,8 @@
  *   pnpm cli pair-code <branchId>
  *   pnpm cli devices <branchId>
  *   pnpm cli projections:rebuild [branchId]
+ *   pnpm cli org:show <orgId>
+ *   pnpm cli org:plan <orgId> <pro|max> <trialing|active|past_due|canceled> [YYYY-MM-DD|none]
  */
 import qrcode from 'qrcode-terminal';
 
@@ -15,7 +17,7 @@ const baseUrl =
 const adminKey = process.env.ADMIN_API_KEY;
 
 async function admin<T>(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PATCH',
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -28,6 +30,31 @@ async function admin<T>(
   const json = (await res.json()) as T & { error?: { message: string } };
   if (!res.ok) throw new Error(json.error?.message ?? `HTTP ${res.status}`);
   return json;
+}
+
+interface PlanJson {
+  plan: string;
+  status: string;
+  state: string;
+  periodEnd: string | null;
+  graceUntil: string | null;
+  limits: { branches: number; devices: number };
+}
+
+interface OrgSummary {
+  name: string;
+  plan: PlanJson;
+  usage: { branches: number; devices: number };
+  branches: { id: string; name: string }[];
+}
+
+function printPlan(label: string, p: PlanJson): void {
+  const date = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleDateString() : 'sin vencimiento';
+  console.log(
+    `${label}: plan ${p.plan} · ${p.status} (${p.state})\n` +
+      `Periodo hasta: ${date(p.periodEnd)} · gracia hasta: ${date(p.graceUntil)}`,
+  );
 }
 
 function flag(args: string[], name: string): string | undefined {
@@ -91,9 +118,44 @@ async function main(): Promise<void> {
       console.log(`Proyecciones reconstruidas desde ${events} eventos`);
       return;
     }
+    case 'org:show': {
+      const [orgId] = args;
+      if (!orgId) throw new Error('Uso: org:show <orgId>');
+      const org = await admin<OrgSummary>('GET', `/organizations/${orgId}`);
+      printPlan(org.name, org.plan);
+      console.log(
+        `Uso: ${org.usage.devices}/${org.plan.limits.devices} equipos · ` +
+          `${org.usage.branches}/${org.plan.limits.branches} sucursales`,
+      );
+      console.table(org.branches);
+      return;
+    }
+    case 'org:plan': {
+      const [orgId, plan, status, end] = args;
+      if (!orgId || !plan || !status) {
+        throw new Error(
+          'Uso: org:plan <orgId> <pro|max> <trialing|active|past_due|canceled> [YYYY-MM-DD|none]',
+        );
+      }
+      // Fin del periodo a medianoche de la Ciudad de México.
+      const currentPeriodEnd =
+        end === undefined ? undefined : end === 'none' ? null : `${end}T00:00:00-06:00`;
+      const res = await admin<{ plan: PlanJson }>(
+        'PATCH',
+        `/organizations/${orgId}/plan`,
+        {
+          plan,
+          subscriptionStatus: status,
+          currentPeriodEnd,
+        },
+      );
+      printPlan(orgId, res.plan);
+      return;
+    }
     default:
       console.log(
-        'Comandos: org:create | branch:create | pair-code | devices | projections:rebuild',
+        'Comandos: org:create | org:show | org:plan | branch:create | pair-code | devices | ' +
+          'projections:rebuild',
       );
       process.exitCode = command ? 1 : 0;
   }

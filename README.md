@@ -47,14 +47,27 @@ pnpm cli branch:create <orgId> "Sucursal Centro" [--tz America/Mexico_City]
 pnpm cli pair-code <branchId>                    # → código de 8 caracteres + QR (15 min)
 pnpm cli devices <branchId>                      # dispositivos emparejados
 pnpm cli projections:rebuild [branchId]          # rehace proyecciones desde events
+pnpm cli org:show <orgId>                        # plan, estado y uso
+pnpm cli org:plan <orgId> pro active 2026-12-31  # activa/cambia el plan (fecha o "none")
 ```
 
 ## API v1
 
-Errores: `{ "error": { "code", "message" } }`.
+Errores: `{ "error": { "code", "message", "details"? } }`.
+
+### Planes (`src/plans.ts`)
+Cada organización tiene `plan` (`pro`/`max`), `subscriptionStatus`,
+`currentPeriodEnd` (`null` = sin vencimiento) y `limitOverrides`. Pro: 1
+sucursal y 3 equipos; Max: 3 y 10. `/v1/signup` arranca con 14 días de
+prueba; tras el fin del periodo hay 7 de gracia. Con el plan vencido, sync,
+snapshot, media y el socket responden `402 subscription_inactive`
+(`details.plan`); sumar un equipo o sucursal de más, `403 plan_limit`. El
+pull incluye `plan`.
 
 ### Admin — header `X-Admin-Key`
-- `POST /v1/admin/organizations {name}`
+- `POST /v1/admin/organizations {name, plan?}`
+- `GET  /v1/admin/organizations/:orgId` → plan, uso (equipos/sucursales) y sucursales
+- `PATCH /v1/admin/organizations/:orgId/plan {plan?, subscriptionStatus?, currentPeriodEnd?, limitOverrides?}`
 - `POST /v1/admin/organizations/:orgId/branches {name, timezoneId?, currencyCode?}`
 - `POST /v1/admin/branches/:branchId/pairing-codes` → `{code, expiresAt}`
 - `GET  /v1/admin/branches/:branchId/devices`

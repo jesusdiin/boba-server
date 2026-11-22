@@ -1,7 +1,8 @@
 import type { RequestHandler } from 'express';
 
 import type { Db } from '../db.js';
-import { unauthorized } from '../errors.js';
+import { HttpError, unauthorized } from '../errors.js';
+import { entitlementsOf, planJson, type Entitlements } from '../plans.js';
 import { sha256 } from '../tokens.js';
 
 /// Identidad del dispositivo resuelta desde su token. Organización y sucursal
@@ -14,6 +15,8 @@ export interface DeviceContext {
   mode: 'staff' | 'kiosk';
   /// Letra de folio del equipo (se devuelve en el pull).
   folioPrefix: string;
+  /// Plan de la organización al resolver el token.
+  entitlements: Entitlements;
 }
 
 declare global {
@@ -36,7 +39,10 @@ export async function resolveDevice(
   db: Db,
   token: string,
 ): Promise<DeviceContext | null> {
-  const device = await db.device.findUnique({ where: { tokenHash: sha256(token) } });
+  const device = await db.device.findUnique({
+    where: { tokenHash: sha256(token) },
+    include: { organization: true },
+  });
   if (!device || device.revokedAt) return null;
   await db.device.update({
     where: { id: device.id },
@@ -48,6 +54,7 @@ export async function resolveDevice(
     branchId: device.branchId,
     mode: device.mode,
     folioPrefix: device.folioPrefix,
+    entitlements: entitlementsOf(device.organization, new Date()),
   };
 }
 
@@ -67,3 +74,22 @@ export function requireDevice(device: DeviceContext | undefined): DeviceContext 
   if (!device) throw unauthorized();
   return device;
 }
+
+/// Error de plan vencido: la nube se pausa (la app sigue cobrando offline).
+export function subscriptionInactive(entitlements: Entitlements): HttpError {
+  return new HttpError(
+    402,
+    'subscription_inactive',
+    'Tu plan venció: la sincronización está en pausa',
+    { plan: planJson(entitlements) },
+  );
+}
+
+/// Detrás de `deviceAuth`: corta con 402 si el plan de la organización venció.
+export const requireActivePlan: RequestHandler = (req, _res, next) => {
+  const device = requireDevice(req.device);
+  if (device.entitlements.state === 'lapsed') {
+    throw subscriptionInactive(device.entitlements);
+  }
+  next();
+};
