@@ -183,65 +183,82 @@ export async function organizationDetail(db: Db, organizationId: string, now: Da
   const usage = (await usageByOrg(db, now)).get(org.id);
   const since = new Date(now.getTime() - 30 * DAY_MS);
 
-  const [branches, users, sales, conflicts, billingEvents, audit, owners] = await Promise.all([
-    db.branch.findMany({
-      where: { organizationId: org.id },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        devices: {
-          orderBy: { createdAt: 'asc' },
-          select: {
-            id: true,
-            name: true,
-            mode: true,
-            folioPrefix: true,
-            lastSeenAt: true,
-            revokedAt: true,
-            createdAt: true,
+  const [branches, users, sales, conflicts, billingEvents, audit, owners, coupons] =
+    await Promise.all([
+      db.branch.findMany({
+        where: { organizationId: org.id },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          devices: {
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              mode: true,
+              folioPrefix: true,
+              lastSeenAt: true,
+              revokedAt: true,
+              createdAt: true,
+            },
           },
         },
-      },
-    }),
-    db.$queryRaw<{ branch_id: string; role: string | null; n: bigint }[]>`
+      }),
+      db.$queryRaw<{ branch_id: string; role: string | null; n: bigint }[]>`
       SELECT u.branch_id, u.role, COUNT(*) AS n
         FROM branch_users u JOIN branches b ON b.id = u.branch_id
        WHERE b.organization_id = ${org.id}::uuid AND u.is_active IS NOT FALSE
        GROUP BY u.branch_id, u.role`,
-    db.$queryRaw<{ branch_id: string; day: string; total: bigint | null; n: bigint }[]>`
+      db.$queryRaw<{ branch_id: string; day: string; total: bigint | null; n: bigint }[]>`
       SELECT s.branch_id, s.business_date AS day, SUM(s.total_cents) AS total, COUNT(*) AS n
         FROM branch_sales s JOIN branches b ON b.id = s.branch_id
        WHERE b.organization_id = ${org.id}::uuid AND s.created_at_utc >= ${since}
        GROUP BY s.branch_id, s.business_date
        ORDER BY s.business_date`,
-    db.syncConflict.findMany({
-      where: { branch: { organizationId: org.id } },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    }),
-    db.billingEvent.findMany({
-      where: { organizationId: org.id },
-      orderBy: { receivedAt: 'desc' },
-      take: 20,
-      select: { id: true, type: true, receivedAt: true },
-    }),
-    db.operatorAudit.findMany({
-      where: { organizationId: org.id },
-      orderBy: { at: 'desc' },
-      take: 50,
-      include: { operator: { select: { name: true, email: true } } },
-    }),
-    // Contacto para soporte: el correo verificado de cada Dueño.
-    db.ownerAccount.findMany({
-      where: { organizationId: org.id },
-      orderBy: { createdAt: 'asc' },
-      select: { email: true, verifiedAt: true },
-    }),
-  ]);
+      db.syncConflict.findMany({
+        where: { branch: { organizationId: org.id } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      db.billingEvent.findMany({
+        where: { organizationId: org.id },
+        orderBy: { receivedAt: 'desc' },
+        take: 20,
+        select: { id: true, type: true, receivedAt: true },
+      }),
+      db.operatorAudit.findMany({
+        where: { organizationId: org.id },
+        orderBy: { at: 'desc' },
+        take: 50,
+        include: { operator: { select: { name: true, email: true } } },
+      }),
+      // Contacto para soporte: el correo verificado de cada Dueño.
+      db.ownerAccount.findMany({
+        where: { organizationId: org.id },
+        orderBy: { createdAt: 'asc' },
+        select: { email: true, verifiedAt: true },
+      }),
+      db.couponRedemption.findMany({
+        where: { organizationId: org.id },
+        orderBy: { redeemedAt: 'desc' },
+        include: {
+          coupon: { select: { id: true, code: true, plan: true, durationDays: true } },
+        },
+      }),
+    ]);
 
   return {
     ...orgSummary(org, usage, now),
     limitOverrides: org.limitOverrides,
     ownerEmails: owners,
+    coupons: coupons.map((r) => ({
+      id: r.id,
+      couponId: r.coupon.id,
+      code: r.coupon.code,
+      plan: r.coupon.plan,
+      durationDays: r.coupon.durationDays,
+      redeemedAt: r.redeemedAt,
+      resultingPeriodEnd: r.resultingPeriodEnd,
+    })),
     branches: branches.map((b) => ({
       id: b.id,
       name: b.name,
@@ -249,7 +266,9 @@ export async function organizationDetail(db: Db, organizationId: string, now: Da
       createdAt: b.createdAt,
       devices: b.devices,
       usersByRole: Object.fromEntries(
-        users.filter((u) => u.branch_id === b.id).map((u) => [u.role ?? '?', Number(u.n)]),
+        users
+          .filter((u) => u.branch_id === b.id)
+          .map((u) => [u.role ?? '?', Number(u.n)]),
       ),
     })),
     salesByDay: sales.map((s) => ({

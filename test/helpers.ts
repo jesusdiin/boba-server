@@ -23,7 +23,13 @@ export function setupTestApp({
   billing,
   requireEventActor,
   accountSends = 1000,
-}: { billing?: BillingConfig; requireEventActor?: boolean; accountSends?: number } = {}) {
+  couponFailures = 1000,
+}: {
+  billing?: BillingConfig;
+  requireEventActor?: boolean;
+  accountSends?: number;
+  couponFailures?: number;
+} = {}) {
   const db = createDb(process.env.DATABASE_URL ?? '');
   const logger = pino({ level: 'silent' });
   const notifier = new InProcessBranchNotifier();
@@ -39,6 +45,7 @@ export function setupTestApp({
     requireEventActor,
     mailer,
     accountThrottle: new PairingThrottle(accountSends),
+    couponThrottle: new PairingThrottle(couponFailures),
     ops: {
       origins: [PANEL_ORIGIN],
       prices: { pro: 34900, max: 79900 },
@@ -68,13 +75,15 @@ export function setupTestApp({
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
         'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
-        'branches, billing_events, owner_accounts, email_codes, organizations, operator_audit, operator_sessions, ' +
+        'branches, billing_events, owner_accounts, email_codes, coupon_redemptions, coupons, organizations, operator_audit, operator_sessions, ' +
         'operators RESTART IDENTITY CASCADE',
     );
   });
   afterAll(async () => {
     realtime?.close();
-    await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
+    await new Promise<void>((resolve) =>
+      server ? server.close(() => resolve()) : resolve(),
+    );
     await db.$disconnect();
   });
 
@@ -95,8 +104,12 @@ export function setupTestApp({
   ) {
     const orgId =
       opts.orgId ??
-      (await admin().post('/organizations', { name: 'Boba & Co.', plan: opts.plan ?? 'max' }))
-        .body.id;
+      (
+        await admin().post('/organizations', {
+          name: 'Boba & Co.',
+          plan: opts.plan ?? 'max',
+        })
+      ).body.id;
     const branch = (
       await admin().post(`/organizations/${orgId}/branches`, { name: 'Centro' })
     ).body;
@@ -402,4 +415,9 @@ export function sale(
 }
 
 export const productUpserted = (id: string, version: number, name: string) =>
-  envelope('product.upserted', 'product', id, { id, name, basePriceCents: 5000, version });
+  envelope('product.upserted', 'product', id, {
+    id,
+    name,
+    basePriceCents: 5000,
+    version,
+  });

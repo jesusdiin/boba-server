@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
+import { redeemCoupon } from '../coupons.js';
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { createDevice, pairResponse } from '../pairing.js';
@@ -13,6 +14,8 @@ const SignupBody = z.object({
   deviceName: z.string().trim().min(1).max(80),
   timezoneId: z.string().min(1).optional(),
   currencyCode: z.string().length(3).optional(),
+  /// Cupón: el negocio arranca con su plan en vez de la prueba.
+  couponCode: z.string().trim().min(1).max(64).optional(),
 });
 
 /// Registro desde la app: el primer dispositivo crea la organización y su
@@ -54,6 +57,8 @@ export function signupRouter(
           currencyCode: body.currencyCode,
         },
       });
+      // Si el cupón no sirve, no se crea nada (falla la transacción).
+      if (body.couponCode) await redeemCoupon(tx, org.id, body.couponCode, new Date());
       const { device, token } = await createDevice(tx, {
         organizationId: org.id,
         branchId: branch.id,

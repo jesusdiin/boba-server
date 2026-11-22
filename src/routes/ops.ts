@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Router } from 'express';
 import { z } from 'zod';
 
@@ -21,6 +23,8 @@ import {
   type Prices,
   type Segment,
 } from '../ops/stats.js';
+import { couponJson, NewCoupon, newCouponCode, normalizeCoupon } from '../coupons.js';
+import { Prisma } from '../../generated/prisma/client.js';
 import { PlanPatch, updateOrgPlan } from '../orgPlan.js';
 import { createPairingCode } from '../pairing.js';
 import { entitlementsOf, planJson } from '../plans.js';
@@ -44,7 +48,9 @@ const NewPassword = z.object({
 
 const ListQuery = z.object({
   q: z.string().trim().optional(),
-  segment: z.enum(['paid', 'trial', 'courtesy', 'canceled', 'grace', 'lapsed']).optional(),
+  segment: z
+    .enum(['paid', 'trial', 'courtesy', 'canceled', 'grace', 'lapsed'])
+    .optional(),
   plan: z.enum(['pro', 'max']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
@@ -101,7 +107,8 @@ export function opsRouter(
 
   router.post('/logout', async (req, res) => {
     const token = readCookie(req, SESSION_COOKIE);
-    if (token) await db.operatorSession.deleteMany({ where: { tokenHash: sha256(token) } });
+    if (token)
+      await db.operatorSession.deleteMany({ where: { tokenHash: sha256(token) } });
     clearSessionCookie(req, res);
     res.json({ ok: true });
   });
@@ -154,7 +161,10 @@ export function opsRouter(
       : new Set<string>();
     const all = (await listOrganizations(db, new Date())).filter(
       (o) =>
-        (!q || o.name.toLowerCase().includes(q) || o.id.startsWith(q) || byEmail.has(o.id)) &&
+        (!q ||
+          o.name.toLowerCase().includes(q) ||
+          o.id.startsWith(q) ||
+          byEmail.has(o.id)) &&
         (!query.segment || o.segment === (query.segment as Segment)) &&
         (!query.plan || o.plan.plan === query.plan),
     );
@@ -260,6 +270,143 @@ export function opsRouter(
     const result = await promoteAdminsToOwners(db, notifier, org.id);
     await audit(req.operator!.id, 'admins_promoted', org.id, result);
     res.json(result);
+  });
+
+  // --- Cupones ------------------------------------------------------------------
+
+  const CouponQuery = z.object({
+    q: z.string().trim().optional(),
+    status: z.enum(['active', 'used', 'disabled', 'expired']).optional(),
+  });
+
+  router.get('/coupons', async (req, res) => {
+    const query = CouponQuery.parse(req.query);
+    const now = new Date();
+    const q = query.q ? normalizeCoupon(query.q) : undefined;
+    const coupons = await db.coupon.findMany({
+      where: q
+        ? {
+            OR: [
+              { code: { contains: q } },
+              { note: { contains: query.q, mode: 'insensitive' } },
+            ],
+          }
+        : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+    res.json({
+      coupons: coupons
+        .map((c) => couponJson(c, now))
+        .filter((c) => !query.status || c.status === query.status),
+    });
+  });
+
+  router.post('/coupons', async (req, res) => {
+    const body = NewCoupon.parse(req.body);
+    if (body.code && body.count > 1) {
+      throw new HttpError(400, 'invalid_body', 'Un código propio es para un solo cupón');
+    }
+    if (body.code && (await db.coupon.findUnique({ where: { code: body.code } }))) {
+      throw new HttpError(409, 'code_taken', 'Ese código ya existe');
+    }
+    const batchId = body.count > 1 ? randomUUID() : null;
+    const data = (code: string) => ({
+      code,
+      plan: body.plan,
+      durationDays: body.durationDays,
+      maxRedemptions: body.maxRedemptions,
+      expiresAt: body.expiresAt ? new Date(body.expiresAt) : null,
+      limitOverrides: body.limitOverrides ?? Prisma.DbNull,
+      note: body.note || null,
+      batchId,
+      createdByOperatorId: req.operator!.id,
+    });
+    const created = [];
+    for (let i = 0; i < body.count; i++) {
+      // Un choque de código generado es rarísimo: se reintenta.
+      for (let attempt = 0; ; attempt++) {
+        const code = body.code ?? newCouponCode();
+        try {
+          created.push(await db.coupon.create({ data: data(code) }));
+          break;
+        } catch (e) {
+          const dup =
+            e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+          if (!dup || body.code || attempt >= 5) throw e;
+        }
+      }
+    }
+    await audit(req.operator!.id, 'coupon_created', null, {
+      count: created.length,
+      plan: body.plan,
+      durationDays: body.durationDays,
+      maxRedemptions: body.maxRedemptions,
+      batchId,
+      codes: created.slice(0, 20).map((c) => c.code),
+    });
+    const now = new Date();
+    res.status(201).json({ coupons: created.map((c) => couponJson(c, now)) });
+  });
+
+  router.get('/coupons/:id', async (req, res) => {
+    const id = z.uuid().safeParse(req.params.id);
+    const coupon = id.success
+      ? await db.coupon.findUnique({
+          where: { id: id.data },
+          include: {
+            redemptions: {
+              orderBy: { redeemedAt: 'desc' },
+              include: { organization: { select: { id: true, name: true } } },
+            },
+          },
+        })
+      : null;
+    if (!coupon) throw notFound('Cupón no encontrado');
+    res.json({
+      ...couponJson(coupon, new Date()),
+      redemptions: coupon.redemptions.map((r) => ({
+        id: r.id,
+        organization: r.organization,
+        redeemedAt: r.redeemedAt,
+        resultingPeriodEnd: r.resultingPeriodEnd,
+      })),
+    });
+  });
+
+  router.patch('/coupons/:id', async (req, res) => {
+    const body = z
+      .object({
+        disabled: z.boolean().optional(),
+        note: z.string().trim().max(200).optional(),
+      })
+      .parse(req.body);
+    const id = z.uuid().safeParse(req.params.id);
+    const coupon = id.success
+      ? await db.coupon.findUnique({ where: { id: id.data } })
+      : null;
+    if (!coupon) throw notFound('Cupón no encontrado');
+    const updated = await db.coupon.update({
+      where: { id: coupon.id },
+      data: {
+        disabledAt:
+          body.disabled === undefined
+            ? undefined
+            : body.disabled
+              ? (coupon.disabledAt ?? new Date())
+              : null,
+        note: body.note,
+      },
+    });
+    if (body.disabled !== undefined) {
+      await audit(
+        req.operator!.id,
+        body.disabled ? 'coupon_disabled' : 'coupon_enabled',
+        null,
+        { code: coupon.code },
+      );
+    }
+    res.json(couponJson(updated, new Date()));
   });
 
   return router;

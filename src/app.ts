@@ -10,6 +10,7 @@ import { noopNotifier, type BranchNotifier } from './realtime/branchNotifier.js'
 import { ConsoleMailer, type Mailer } from './mail/mailer.js';
 import { accountRouter } from './routes/account.js';
 import { adminRouter } from './routes/admin.js';
+import { couponsRouter } from './routes/coupons.js';
 import {
   billingDeviceRouter,
   billingWebhookRouter,
@@ -46,6 +47,8 @@ export interface AppDeps {
   mailer?: Mailer;
   /// Envíos de códigos por usuario (pruebas).
   accountThrottle?: PairingThrottle;
+  /// Cupones inexistentes por equipo (pruebas).
+  couponThrottle?: PairingThrottle;
 }
 
 /// Headers con credenciales: se registran como `[Redacted]`.
@@ -70,6 +73,7 @@ export function createApp({
   ops = {},
   mailer,
   accountThrottle,
+  couponThrottle,
 }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -99,8 +103,15 @@ export function createApp({
   );
   // Plan vencido: la nube se pausa (402), pero `/v1/branch` sigue abierto
   // para poder revocar equipos y ajustarse al límite.
-  app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier, { requireActor: requireEventActor }));
+  app.use(
+    '/v1/sync',
+    deviceAuth(db),
+    requireActivePlan,
+    syncRouter(db, notifier, { requireActor: requireEventActor }),
+  );
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
+  // Sin `requireActivePlan`: un plan vencido se reactiva con un código.
+  app.use('/v1/coupons', deviceAuth(db), couponsRouter(db, couponThrottle));
   // Sin `requireActivePlan`: recuperar el PIN no depende del plan.
   app.use(
     '/v1/account',

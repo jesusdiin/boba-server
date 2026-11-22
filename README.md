@@ -160,6 +160,23 @@ uso, 5 intentos; 3 envíos por usuario cada 15 min (`429`).
     cambia el PIN localmente y lo sube como `user.updated` del propio Dueño
 - Errores: `invalid_code`, `code_expired`, `too_many_attempts`.
 
+### Cupones — `Authorization: Bearer <token>` + `X-Boba-User` (Dueño)
+Cortesías, licencias y campañas: un código da un plan por N días o sin
+vencimiento (y límites extra opcionales). Se crean en el panel del operador.
+- `POST /v1/coupons/redeem {code}` → `{plan}`. Funciona con el plan vencido.
+  Los días se suman al final del periodo vigente del mismo plan; con otro
+  plan o vencido, cuentan desde hoy. El negocio pasa a `manual`.
+- `POST /v1/signup {…, couponCode?}`: el negocio arranca con el plan del
+  cupón; si el cupón no sirve, no se crea nada.
+- Errores: `404 invalid_coupon` (no existe o deshabilitado), `410
+  coupon_expired`, `409 coupon_exhausted` / `coupon_already_used` /
+  `store_subscription` (paga en la tienda) / `higher_plan` /
+  `already_unlimited`; 10 códigos inexistentes por equipo cada 15 min → `429`.
+- Panel: `GET/POST /v1/ops/coupons` (uno con código propio o un lote de hasta
+  200 `BOBA-XXXX-XXXX`), `GET/PATCH /v1/ops/coupons/:id` (canjes,
+  deshabilitar). Base de referidos: `coupons.kind = referral` +
+  `referrer_organization_id`; los canjes quedan en `coupon_redemptions`.
+
 #### Correo saliente (SMTP)
 `SMTP_HOST`, `SMTP_PORT` (587; 465 = TLS directo), `SMTP_USER`, `SMTP_PASS` y
 `MAIL_FROM` (`Boba POS <no-reply@diino.mx>`). Sirve cualquier proveedor SMTP
