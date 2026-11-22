@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
-import { envelope, setupTestApp, userCreated } from './helpers.js';
+import {
+  envelope,
+  orderCancelled,
+  orderCreated,
+  setupTestApp,
+  userCreated,
+} from './helpers.js';
 
 /// Quién hizo cada cambio de usuarios, catálogo e insumos (`actorUserId`).
 const t = setupTestApp();
@@ -33,7 +39,11 @@ function userEvent(
 
 function product(
   actor: string | null,
-  { version = 1, price = 6500, soldOut = false }: { version?: number; price?: number; soldOut?: boolean } = {},
+  {
+    version = 1,
+    price = 6500,
+    soldOut = false,
+  }: { version?: number; price?: number; soldOut?: boolean } = {},
 ) {
   return envelope('product.upserted', 'product', 'p1', {
     id: 'p1',
@@ -63,34 +73,42 @@ async function branchWithStaff() {
   };
 }
 
-const codes = (res: request.Response) =>
-  [
-    ...(res.body.accepted as unknown[]).map(() => 'ok'),
-    ...(res.body.rejected as { code: string }[]).map((r) => r.code),
-  ];
+const codes = (res: request.Response) => [
+  ...(res.body.accepted as unknown[]).map(() => 'ok'),
+  ...(res.body.rejected as { code: string }[]).map((r) => r.code),
+];
 
 describe('usuarios', () => {
   it('un cajero no da de alta usuarios; un admin sí (no Dueños)', async () => {
     const b = await branchWithStaff();
-    expect(codes(await t.push(b.token, [userEvent('user.created', 'waiter', b.cashier)]))).toEqual([
-      'forbidden',
-    ]);
-    expect(codes(await t.push(b.token, [userEvent('user.created', 'waiter', b.admin)]))).toEqual([
-      'ok',
-    ]);
-    expect(codes(await t.push(b.token, [userEvent('user.created', 'owner', b.admin)]))).toEqual([
-      'forbidden',
-    ]);
+    expect(
+      codes(await t.push(b.token, [userEvent('user.created', 'waiter', b.cashier)])),
+    ).toEqual(['forbidden']);
+    expect(
+      codes(await t.push(b.token, [userEvent('user.created', 'waiter', b.admin)])),
+    ).toEqual(['ok']);
+    expect(
+      codes(await t.push(b.token, [userEvent('user.created', 'owner', b.admin)])),
+    ).toEqual(['forbidden']);
   });
 
   it('un admin no edita ni asciende a un Dueño; el Dueño sí', async () => {
     const b = await branchWithStaff();
-    const demote = userEvent('user.updated', 'cashier', b.admin, { id: b.owner, version: 2 });
-    const promote = userEvent('user.updated', 'owner', b.admin, { id: b.cashier, version: 2 });
+    const demote = userEvent('user.updated', 'cashier', b.admin, {
+      id: b.owner,
+      version: 2,
+    });
+    const promote = userEvent('user.updated', 'owner', b.admin, {
+      id: b.cashier,
+      version: 2,
+    });
     const res = await t.push(b.token, [demote, promote]);
     expect(codes(res)).toEqual(['forbidden', 'forbidden']);
 
-    const byOwner = userEvent('user.updated', 'owner', b.owner, { id: b.cashier, version: 2 });
+    const byOwner = userEvent('user.updated', 'owner', b.owner, {
+      id: b.cashier,
+      version: 2,
+    });
     expect(codes(await t.push(b.token, [byOwner]))).toEqual(['ok']);
   });
 
@@ -146,7 +164,11 @@ describe('catálogo e insumos', () => {
 
   it('un cajero actualiza el costo de un insumo (entrada), no lo demás', async () => {
     const b = await branchWithStaff();
-    const supply = (actor: string, version: number, extra: Record<string, unknown> = {}) =>
+    const supply = (
+      actor: string,
+      version: number,
+      extra: Record<string, unknown> = {},
+    ) =>
       envelope('supply.upserted', 'supply', 's1', {
         id: 's1',
         name: 'Leche',
@@ -157,26 +179,55 @@ describe('catálogo e insumos', () => {
         ...extra,
       });
     expect(codes(await t.push(b.token, [supply(b.admin, 1)]))).toEqual(['ok']);
-    expect(codes(await t.push(b.token, [supply(b.cashier, 2, { unitCostCents: 25 })]))).toEqual([
-      'ok',
-    ]);
-    expect(codes(await t.push(b.token, [supply(b.cashier, 3, { name: 'Agua' })]))).toEqual([
-      'forbidden',
-    ]);
+    expect(
+      codes(await t.push(b.token, [supply(b.cashier, 2, { unitCostCents: 25 })])),
+    ).toEqual(['ok']);
+    expect(
+      codes(await t.push(b.token, [supply(b.cashier, 3, { name: 'Agua' })])),
+    ).toEqual(['forbidden']);
+  });
+});
+
+describe('pedidos', () => {
+  it('cancelar se valida con quien cancela (o quien lo creó, apps viejas)', async () => {
+    const b = await branchWithStaff();
+    const kiosk = userCreated('customer');
+    await t.push(b.token, [kiosk]);
+    const id = randomUUID();
+    await t.push(b.token, [orderCreated(id, { createdByUserId: b.cashier })]);
+
+    const byCustomer = orderCancelled(id, {
+      createdByUserId: b.cashier,
+      cancelledByUserId: kiosk.aggregateId,
+    });
+    expect(codes(await t.push(b.token, [byCustomer]))).toEqual(['forbidden']);
+
+    const byCashier = orderCancelled(id, {
+      createdByUserId: b.cashier,
+      cancelledByUserId: b.cashier,
+    });
+    expect(codes(await t.push(b.token, [byCashier]))).toEqual(['ok']);
   });
 });
 
 describe('nombre del negocio', () => {
   it('un admin guarda su sucursal pero no cambia el nombre del negocio', async () => {
     const b = await branchWithStaff();
-    const details = (userId: string, businessName: string, branchName: string, setAtUtc: string) =>
+    const details = (
+      userId: string,
+      businessName: string,
+      branchName: string,
+      setAtUtc: string,
+    ) =>
       envelope('branch.details_set', 'branch', b.branchId, {
         businessName,
         branchName,
         setAtUtc,
         userId,
       });
-    await t.push(b.token, [details(b.owner, 'Perlas & Té', 'Centro', '2026-11-22T15:00:00.000Z')]);
+    await t.push(b.token, [
+      details(b.owner, 'Perlas & Té', 'Centro', '2026-11-22T15:00:00.000Z'),
+    ]);
     const res = await t.push(b.token, [
       details(b.admin, 'Otro nombre', 'Norte', '2026-11-22T16:00:00.000Z'),
     ]);
@@ -186,7 +237,10 @@ describe('nombre del negocio', () => {
       where: { id: b.branchId },
       include: { organization: true },
     });
-    expect(branch).toMatchObject({ name: 'Norte', organization: { name: 'Perlas & Té' } });
+    expect(branch).toMatchObject({
+      name: 'Norte',
+      organization: { name: 'Perlas & Té' },
+    });
   });
 });
 

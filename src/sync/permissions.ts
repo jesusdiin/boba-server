@@ -76,9 +76,14 @@ export function actorAndPermission(
     case 'shift.closed':
       return { actor: str(payload.closedByUserId), permission: 'cashShift' };
     case 'incoming_order.created':
-    case 'incoming_order.cancelled':
     case 'incoming_order.prep_changed':
       return { actor: str(payload.createdByUserId), permission: 'takeOrders' };
+    // Quien cancela (apps viejas no lo mandan: se valida a quien lo creó).
+    case 'incoming_order.cancelled':
+      return {
+        actor: str(payload.cancelledByUserId) ?? str(payload.createdByUserId),
+        permission: 'takeOrders',
+      };
     case 'branch.theme_set':
       return { actor: str(payload.userId), permission: 'manageAppearance' };
     case 'branch.details_set':
