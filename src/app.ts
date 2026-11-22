@@ -7,6 +7,8 @@ import { deviceAuth, requireActivePlan } from './auth/deviceAuth.js';
 import type { Db } from './db.js';
 import { errorHandler, notFound } from './errors.js';
 import { noopNotifier, type BranchNotifier } from './realtime/branchNotifier.js';
+import { ConsoleMailer, type Mailer } from './mail/mailer.js';
+import { accountRouter } from './routes/account.js';
 import { adminRouter } from './routes/admin.js';
 import {
   billingDeviceRouter,
@@ -40,6 +42,10 @@ export interface AppDeps {
   requireEventActor?: boolean;
   /// Panel del operador: orígenes con CORS y precios para el MRR.
   ops?: { origins?: string[]; prices?: Prices; throttle?: PairingThrottle };
+  /// Correos de la cuenta del Dueño; sin él, van al log (desarrollo).
+  mailer?: Mailer;
+  /// Envíos de códigos por usuario (pruebas).
+  accountThrottle?: PairingThrottle;
 }
 
 /// App Express sin `listen` (los tests la usan con supertest).
@@ -54,6 +60,8 @@ export function createApp({
   billing = {},
   requireEventActor = false,
   ops = {},
+  mailer,
+  accountThrottle,
 }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -84,6 +92,15 @@ export function createApp({
   // para poder revocar equipos y ajustarse al límite.
   app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier, { requireActor: requireEventActor }));
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
+  // Sin `requireActivePlan`: recuperar el PIN no depende del plan.
+  app.use(
+    '/v1/account',
+    deviceAuth(db),
+    accountRouter(db, {
+      mailer: mailer ?? new ConsoleMailer(logger),
+      sendThrottle: accountThrottle,
+    }),
+  );
   app.use('/v1/org', deviceAuth(db), requireActivePlan, orgRouter(db, notifier));
   app.use('/v1/billing', billingWebhookRouter(db, billing));
   app.use('/v1/billing', deviceAuth(db), billingDeviceRouter(db, billing));

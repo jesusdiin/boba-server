@@ -11,6 +11,7 @@ import { createDb } from '../src/db.js';
 import { InProcessBranchNotifier } from '../src/realtime/branchNotifier.js';
 import { attachRealtime } from '../src/realtime/wsServer.js';
 import type { BillingConfig } from '../src/routes/billing.js';
+import { RecordingMailer } from '../src/mail/mailer.js';
 import { PairingThrottle } from '../src/routes/devices.js';
 
 export const ADMIN_KEY = process.env.ADMIN_API_KEY ?? '';
@@ -21,10 +22,12 @@ export const PANEL_ORIGIN = 'http://panel.test';
 export function setupTestApp({
   billing,
   requireEventActor,
-}: { billing?: BillingConfig; requireEventActor?: boolean } = {}) {
+  accountSends = 1000,
+}: { billing?: BillingConfig; requireEventActor?: boolean; accountSends?: number } = {}) {
   const db = createDb(process.env.DATABASE_URL ?? '');
   const logger = pino({ level: 'silent' });
   const notifier = new InProcessBranchNotifier();
+  const mailer = new RecordingMailer();
   const app = createApp({
     db,
     adminApiKey: ADMIN_KEY,
@@ -34,6 +37,8 @@ export function setupTestApp({
     notifier,
     billing,
     requireEventActor,
+    mailer,
+    accountThrottle: new PairingThrottle(accountSends),
     ops: {
       origins: [PANEL_ORIGIN],
       prices: { pro: 34900, max: 79900 },
@@ -56,13 +61,14 @@ export function setupTestApp({
   }
 
   beforeEach(async () => {
+    mailer.sent.length = 0;
     await db.$executeRawUnsafe(
       'TRUNCATE branch_sale_item_modifiers, branch_sale_items, branch_payments, ' +
         'branch_sales, branch_cash_movements, branch_supply_movements, branch_shifts, ' +
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
         'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
-        'branches, billing_events, organizations, operator_audit, operator_sessions, ' +
+        'branches, billing_events, owner_accounts, email_codes, organizations, operator_audit, operator_sessions, ' +
         'operators RESTART IDENTITY CASCADE',
     );
   });
@@ -159,6 +165,7 @@ export function setupTestApp({
   return {
     app,
     db,
+    mailer,
     notifier,
     listen,
     admin,

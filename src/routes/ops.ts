@@ -141,9 +141,20 @@ export function opsRouter(
   router.get('/organizations', async (req, res) => {
     const query = ListQuery.parse(req.query);
     const q = query.q?.toLowerCase();
+    // Buscar también por el correo de un Dueño.
+    const byEmail = q?.includes('@')
+      ? new Set(
+          (
+            await db.ownerAccount.findMany({
+              where: { email: { contains: q } },
+              select: { organizationId: true },
+            })
+          ).map((a) => a.organizationId),
+        )
+      : new Set<string>();
     const all = (await listOrganizations(db, new Date())).filter(
       (o) =>
-        (!q || o.name.toLowerCase().includes(q) || o.id.startsWith(q)) &&
+        (!q || o.name.toLowerCase().includes(q) || o.id.startsWith(q) || byEmail.has(o.id)) &&
         (!query.segment || o.segment === (query.segment as Segment)) &&
         (!query.plan || o.plan.plan === query.plan),
     );

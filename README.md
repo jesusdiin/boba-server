@@ -142,6 +142,29 @@ El usuario tiene que ser admin activo de la sucursal del token (según los
 - `GET  /v1/branch/devices` → `{devices: [{id, name, mode, lastSeenAt, revokedAt, createdAt}]}`
 - `POST /v1/branch/devices/:id/revoke` → `404` si no es de la sucursal,
   `409 cannot_revoke_self` si es el propio; cierra su socket (4401)
+- `GET  /v1/branch/conflicts?all=1` → `{conflicts, pending}` (doble cobro,
+  cierre de turno descartado); `POST /v1/branch/conflicts/:id/review`
+
+### Cuenta del Dueño — `Authorization: Bearer <token>`
+Correo verificado de cada Dueño (uno por Dueño; cada correo, un negocio) y
+cambio del PIN olvidado. Códigos de 6 dígitos por correo: 10 min, un solo
+uso, 5 intentos; 3 envíos por usuario cada 15 min (`429`).
+- Con `X-Boba-User` de un Dueño:
+  - `GET  /v1/account/email` → `{account: {email, verifiedAt} | null}`
+  - `POST /v1/account/email/start {email}` → `202`; `409 email_taken`
+  - `POST /v1/account/email/verify {email, code}` → `{account}`
+- Sin sesión (pantalla de PIN):
+  - `POST /v1/account/pin-reset/start {userId}` → `{maskedEmail}`;
+    `404 no_account` si ese Dueño no tiene correo verificado
+  - `POST /v1/account/pin-reset/verify {userId, code}` → `{ok: true}`; la app
+    cambia el PIN localmente y lo sube como `user.updated` del propio Dueño
+- Errores: `invalid_code`, `code_expired`, `too_many_attempts`.
+
+#### Correo saliente (SMTP)
+`SMTP_HOST`, `SMTP_PORT` (587; 465 = TLS directo), `SMTP_USER`, `SMTP_PASS` y
+`MAIL_FROM` (`Boba POS <no-reply@diino.mx>`). Sirve cualquier proveedor SMTP
+(Resend, Brevo, Amazon SES, Zoho…). Sin `SMTP_HOST` los correos, con el
+código, van al log: solo para desarrollo.
 
 ### Organización — `Authorization: Bearer <token>` + `X-Boba-User: <userId>`
 Solo el Dueño (`owner`) de la sucursal del token; plan vencido → `402`.

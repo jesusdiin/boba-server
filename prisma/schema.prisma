@@ -55,6 +55,8 @@ model Organization {
   events   Event[]
   media    Media[]
   billingEvents BillingEvent[]
+  ownerAccounts OwnerAccount[]
+  emailCodes    EmailCode[]
 
   @@map("organizations")
 }
@@ -633,4 +635,40 @@ model OperatorAudit {
   @@index([at])
   @@index([organizationId, at])
   @@map("operator_audit")
+}
+
+/// Correo verificado de un Dueño (uno por Dueño; cada correo, un negocio).
+model OwnerAccount {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  /// Id del usuario Dueño (agregado `user` de la app).
+  userId         String   @unique @map("user_id") @db.Uuid
+  email          String   @unique
+  verifiedAt     DateTime @map("verified_at") @db.Timestamptz(3)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("owner_accounts")
+}
+
+/// Código de un solo uso enviado por correo (`link_email` | `reset_pin`).
+/// Solo se guarda su hash.
+model EmailCode {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  email          String
+  purpose        String
+  codeHash       String    @map("code_hash")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  attempts       Int       @default(0)
+  consumedAt     DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("email_codes")
 }

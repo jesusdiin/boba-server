@@ -174,15 +174,16 @@ export async function systemStats(db: Db, prices: Prices, now: Date) {
   };
 }
 
-/// Detalle de un negocio para soporte (sin datos personales: usuarios solo
-/// como conteo por rol; ventas solo totales).
+/// Detalle de un negocio para soporte: usuarios solo como conteo por rol y
+/// ventas solo totales; el único dato personal es el correo de los Dueños
+/// (contacto de soporte).
 export async function organizationDetail(db: Db, organizationId: string, now: Date) {
   const org = await db.organization.findUnique({ where: { id: organizationId } });
   if (!org) return null;
   const usage = (await usageByOrg(db, now)).get(org.id);
   const since = new Date(now.getTime() - 30 * DAY_MS);
 
-  const [branches, users, sales, conflicts, billingEvents, audit] = await Promise.all([
+  const [branches, users, sales, conflicts, billingEvents, audit, owners] = await Promise.all([
     db.branch.findMany({
       where: { organizationId: org.id },
       orderBy: { createdAt: 'asc' },
@@ -229,11 +230,18 @@ export async function organizationDetail(db: Db, organizationId: string, now: Da
       take: 50,
       include: { operator: { select: { name: true, email: true } } },
     }),
+    // Contacto para soporte: el correo verificado de cada Dueño.
+    db.ownerAccount.findMany({
+      where: { organizationId: org.id },
+      orderBy: { createdAt: 'asc' },
+      select: { email: true, verifiedAt: true },
+    }),
   ]);
 
   return {
     ...orgSummary(org, usage, now),
     limitOverrides: org.limitOverrides,
+    ownerEmails: owners,
     branches: branches.map((b) => ({
       id: b.id,
       name: b.name,

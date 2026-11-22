@@ -33,6 +33,13 @@ const Env = z.object({
   /// Precio mensual por plan (centavos MXN) para el MRR estimado del panel.
   PLAN_PRICE_PRO_CENTS: z.coerce.number().int().min(0).default(34900),
   PLAN_PRICE_MAX_CENTS: z.coerce.number().int().min(0).optional(),
+  /// Correo saliente (códigos de la cuenta del Dueño). Sin `SMTP_HOST`, los
+  /// correos van al log: solo para desarrollo.
+  SMTP_HOST: z.string().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).default(587),
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASS: z.string().optional(),
+  MAIL_FROM: z.string().min(3).default('Boba POS <no-reply@diino.mx>'),
   PORT: z.coerce.number().int().min(0).default(4000),
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
