@@ -13,7 +13,7 @@ const forbidden = (code: string, message: string) => new HttpError(403, code, me
 /// Administración de la sucursal desde la app: el dispositivo se autentica
 /// con su token y el usuario de la sesión viaja en `X-Boba-User`; tiene que
 /// ser admin **de la sucursal del token** (según los usuarios sincronizados).
-async function requireBranchAdmin(
+export async function requireBranchAdmin(
   db: Db,
   device: DeviceContext,
   userId: string | undefined,

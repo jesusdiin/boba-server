@@ -43,6 +43,7 @@ interface PlanJson {
 
 interface OrgSummary {
   name: string;
+  billingSource: string;
   plan: PlanJson;
   usage: { branches: number; devices: number };
   branches: { id: string; name: string }[];
@@ -123,6 +124,7 @@ async function main(): Promise<void> {
       if (!orgId) throw new Error('Uso: org:show <orgId>');
       const org = await admin<OrgSummary>('GET', `/organizations/${orgId}`);
       printPlan(org.name, org.plan);
+      console.log(`Cobro: ${org.billingSource === 'store' ? 'tienda (RevenueCat)' : 'manual'}`);
       console.log(
         `Uso: ${org.usage.devices}/${org.plan.limits.devices} equipos · ` +
           `${org.usage.branches}/${org.plan.limits.branches} sucursales`,

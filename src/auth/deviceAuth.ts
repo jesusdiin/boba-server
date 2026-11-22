@@ -76,12 +76,15 @@ export function requireDevice(device: DeviceContext | undefined): DeviceContext 
 }
 
 /// Error de plan vencido: la nube se pausa (la app sigue cobrando offline).
-export function subscriptionInactive(entitlements: Entitlements): HttpError {
+export function subscriptionInactive(
+  entitlements: Entitlements,
+  organizationId?: string,
+): HttpError {
   return new HttpError(
     402,
     'subscription_inactive',
     'Tu plan venció: la sincronización está en pausa',
-    { plan: planJson(entitlements) },
+    { plan: planJson(entitlements, organizationId) },
   );
 }
 
@@ -89,7 +92,7 @@ export function subscriptionInactive(entitlements: Entitlements): HttpError {
 export const requireActivePlan: RequestHandler = (req, _res, next) => {
   const device = requireDevice(req.device);
   if (device.entitlements.state === 'lapsed') {
-    throw subscriptionInactive(device.entitlements);
+    throw subscriptionInactive(device.entitlements, device.organizationId);
   }
   next();
 };

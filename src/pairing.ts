@@ -99,7 +99,8 @@ export async function ensureCanAddDevice(
   const org = await db.organization.findUnique({ where: { id: organizationId } });
   if (!org) throw notFound('Organización no encontrada');
   const entitlements = entitlementsOf(org, new Date());
-  if (entitlements.state === 'lapsed') throw subscriptionInactive(entitlements);
+  if (entitlements.state === 'lapsed')
+    throw subscriptionInactive(entitlements, organizationId);
   const used = await db.device.count({ where: { organizationId, revokedAt: null } });
   if (used >= entitlements.limits.devices) {
     throw planLimit('devices', entitlements.limits.devices, used);

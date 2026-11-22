@@ -167,7 +167,7 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
       // Letra de folio del equipo del token (los ya vinculados la reciben aquí).
       folioPrefix: device.folioPrefix,
       // Plan de la organización: la app lo guarda y ajusta sus límites.
-      plan: planJson(device.entitlements),
+      plan: planJson(device.entitlements, device.organizationId),
     });
   });
 

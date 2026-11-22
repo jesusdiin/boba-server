@@ -94,9 +94,11 @@ function stateOf(
   return now < graceUntil ? 'grace' : 'lapsed';
 }
 
-/// Forma pública (pull, errores 402, admin). La app la guarda tal cual.
-export function planJson(e: Entitlements) {
+/// Forma pública (pull, errores 402, admin). La app la guarda tal cual;
+/// `organizationId` es su usuario en la tienda (RevenueCat).
+export function planJson(e: Entitlements, organizationId?: string) {
   return {
+    ...(organizationId ? { organizationId } : {}),
     plan: e.plan,
     status: e.status,
     state: e.state,

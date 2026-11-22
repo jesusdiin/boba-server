@@ -30,6 +30,14 @@ enum SubscriptionStatus {
   @@map("subscription_status")
 }
 
+/// Quién maneja el plan: a mano (CLI/admin, pilotos) o la tienda (RevenueCat).
+enum BillingSource {
+  manual
+  store
+
+  @@map("billing_source")
+}
+
 model Organization {
   id                 String             @id @default(uuid()) @db.Uuid
   name               String
@@ -39,14 +47,31 @@ model Organization {
   currentPeriodEnd   DateTime?          @map("current_period_end") @db.Timestamptz(3)
   /// Ajustes a los límites del plan (`{ branches?, devices? }`).
   limitOverrides     Json?              @map("limit_overrides")
+  billingSource      BillingSource      @default(manual) @map("billing_source")
   createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
 
   branches Branch[]
   devices  Device[]
   events   Event[]
   media    Media[]
+  billingEvents BillingEvent[]
 
   @@map("organizations")
+}
+
+/// Webhook de RevenueCat ya procesado (idempotencia y auditoría).
+model BillingEvent {
+  /// `event.id` de RevenueCat.
+  id             String   @id
+  organizationId String?  @map("organization_id") @db.Uuid
+  type           String
+  payload        Json
+  receivedAt     DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("billing_events")
 }
 
 /// Foto subida desde la app (producto o sabor). Los eventos la nombran como

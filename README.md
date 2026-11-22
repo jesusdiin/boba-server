@@ -64,6 +64,51 @@ snapshot, media y el socket responden `402 subscription_inactive`
 (`details.plan`); sumar un equipo o sucursal de más, `403 plan_limit`. El
 pull incluye `plan`.
 
+### Cobro en la app (RevenueCat)
+La suscripción se compra en Play Store / App Store; RevenueCat la valida. El
+`app_user_id` es el **id de la organización**. Variables (opcionales; sin
+ellas las rutas responden `503 billing_not_configured`):
+`REVENUECAT_SECRET_KEY` (llave secreta de la API v1) y
+`REVENUECAT_WEBHOOK_SECRET` (valor exacto del header `Authorization`, ≥ 16
+caracteres).
+
+- `POST /v1/billing/revenuecat` — webhook. Valida el secreto, registra el
+  evento en `billing_events` (un reenvío responde `{duplicate: true}`) y, por
+  cada organización que mencione, **vuelve a leer al suscriptor** en
+  RevenueCat y recalcula `plan`, `subscriptionStatus` y `currentPeriodEnd`
+  (`src/billing/revenuecat.ts`). Una org desconocida se ignora con 200.
+- `POST /v1/billing/sync` — `Bearer` + `X-Boba-User` admin (como
+  `/v1/branch`); recalcula al momento tras comprar o restaurar y devuelve
+  `{plan}`. Funciona aunque el plan esté vencido.
+- `Organization.billingSource`: `manual` (CLI/admin) o `store`. Una compra
+  vigente lo pasa a `store`; una suscripción vencida no pisa un plan manual.
+
+Mapeo: entitlement `max` vigente > `pro` vigente; `expires_date` → fin del
+periodo; problema de cobro → `past_due`; cancelada (aún vigente) →
+`canceled`; prueba de la tienda → `trialing`; sin vigentes → `canceled` con
+el último vencimiento.
+
+#### Configuración (una vez)
+1. **Play Console** (`mx.diino.bobapos`): suscripciones `boba_pro` y
+   `boba_max`, cada una con planes base `mensual` y `anual` (precios en MXN).
+   Sube un build con Billing a la pista de **prueba interna** y agrega
+   testers de licencia.
+2. **Google Cloud**: cuenta de servicio con acceso a la API de Play
+   (permisos de finanzas/pedidos) y su JSON en RevenueCat; tema de Pub/Sub
+   para las notificaciones en tiempo real hacia RevenueCat.
+3. **RevenueCat**: app Android; productos importados; entitlements `pro`
+   (`boba_pro:*`) y `max` (`boba_max:*`); offering `default` (actual) con
+   paquetes **personalizados** `pro_mensual`, `pro_anual`, `max_mensual`,
+   `max_anual` (la app los lee por ese nombre). Webhook a
+   `https://<servidor>/v1/billing/revenuecat` con el header `Authorization`
+   = `REVENUECAT_WEBHOOK_SECRET`.
+4. **App**: compilar con `--dart-define=REVENUECAT_GOOGLE_KEY=goog_…` (llave
+   pública del SDK).
+5. **iOS (después)**: productos con los mismos ids en App Store Connect,
+   Small Business Program, capacidad *In-App Purchase* en Xcode, app iOS en
+   RevenueCat (mismos entitlements y offering) y
+   `--dart-define=REVENUECAT_APPLE_KEY=appl_…`. Sin cambios de código.
+
 ### Admin — header `X-Admin-Key`
 - `POST /v1/admin/organizations {name, plan?}`
 - `GET  /v1/admin/organizations/:orgId` → plan, uso (equipos/sucursales) y sucursales

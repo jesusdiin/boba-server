@@ -10,12 +10,13 @@ import { createApp } from '../src/app.js';
 import { createDb } from '../src/db.js';
 import { InProcessBranchNotifier } from '../src/realtime/branchNotifier.js';
 import { attachRealtime } from '../src/realtime/wsServer.js';
+import type { BillingConfig } from '../src/routes/billing.js';
 import { PairingThrottle } from '../src/routes/devices.js';
 
 export const ADMIN_KEY = process.env.ADMIN_API_KEY ?? '';
 
 /// App + DB de pruebas; las tablas se vacían antes de cada test.
-export function setupTestApp() {
+export function setupTestApp({ billing }: { billing?: BillingConfig } = {}) {
   const db = createDb(process.env.DATABASE_URL ?? '');
   const logger = pino({ level: 'silent' });
   const notifier = new InProcessBranchNotifier();
@@ -26,6 +27,7 @@ export function setupTestApp() {
     pairingThrottle: new PairingThrottle(1000),
     signupThrottle: new PairingThrottle(1000),
     notifier,
+    billing,
   });
 
   // Servidor HTTP real (puerto efímero) solo para los tests de WebSocket.
@@ -49,7 +51,7 @@ export function setupTestApp() {
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
         'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
-        'branches, organizations RESTART IDENTITY CASCADE',
+        'branches, billing_events, organizations RESTART IDENTITY CASCADE',
     );
   });
   afterAll(async () => {

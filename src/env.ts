@@ -8,6 +8,10 @@ const Env = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /// Cobro en la app: llave secreta de la API de RevenueCat y el valor del
+  /// header `Authorization` de su webhook. Sin ellas, `/v1/billing/*` → 503.
+  REVENUECAT_SECRET_KEY: z.string().min(1).optional(),
+  REVENUECAT_WEBHOOK_SECRET: z.string().min(16).optional(),
   PORT: z.coerce.number().int().min(0).default(4000),
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])

@@ -25,6 +25,7 @@ describe('planes y límites', () => {
     const pulled = await t.pull(signup.token);
     expect(pulled.status).toBe(200);
     expect(pulled.body.plan).toMatchObject({
+      organizationId: signup.organizationId,
       plan: 'pro',
       status: 'trialing',
       state: 'active',

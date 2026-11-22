@@ -8,6 +8,11 @@ import type { Db } from './db.js';
 import { errorHandler, notFound } from './errors.js';
 import { noopNotifier, type BranchNotifier } from './realtime/branchNotifier.js';
 import { adminRouter } from './routes/admin.js';
+import {
+  billingDeviceRouter,
+  billingWebhookRouter,
+  type BillingConfig,
+} from './routes/billing.js';
 import { branchRouter } from './routes/branch.js';
 import { devicesRouter, PairingThrottle } from './routes/devices.js';
 import { mediaRouter } from './routes/media.js';
@@ -25,6 +30,8 @@ export interface AppDeps {
   /// Registro de negocios desde la app (`POST /v1/signup`).
   signupEnabled?: boolean;
   signupThrottle?: PairingThrottle;
+  /// Cobro en la app (RevenueCat); sin él, `/v1/billing/*` responde 503.
+  billing?: BillingConfig;
 }
 
 /// App Express sin `listen` (los tests la usan con supertest).
@@ -36,6 +43,7 @@ export function createApp({
   notifier = noopNotifier,
   signupEnabled = true,
   signupThrottle,
+  billing = {},
 }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -57,6 +65,8 @@ export function createApp({
   // para poder revocar equipos y ajustarse al límite.
   app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier));
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
+  app.use('/v1/billing', billingWebhookRouter(db, billing));
+  app.use('/v1/billing', deviceAuth(db), billingDeviceRouter(db, billing));
   app.use('/v1/branches', deviceAuth(db), requireActivePlan, snapshotRouter(db));
   app.use('/v1/media', deviceAuth(db), requireActivePlan, mediaRouter(db));
 

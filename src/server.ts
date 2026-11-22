@@ -1,6 +1,7 @@
 import { pino } from 'pino';
 
 import { createApp } from './app.js';
+import { revenueCatFetcher } from './billing/revenuecat.js';
 import { createDb } from './db.js';
 import { loadEnv } from './env.js';
 import { InProcessBranchNotifier } from './realtime/branchNotifier.js';
@@ -16,6 +17,12 @@ const app = createApp({
   logger,
   notifier,
   signupEnabled: env.SIGNUP_ENABLED,
+  billing: {
+    fetchSubscriber: env.REVENUECAT_SECRET_KEY
+      ? revenueCatFetcher(env.REVENUECAT_SECRET_KEY)
+      : undefined,
+    webhookSecret: env.REVENUECAT_WEBHOOK_SECRET,
+  },
 });
 
 const server = app.listen(env.PORT, () => {
