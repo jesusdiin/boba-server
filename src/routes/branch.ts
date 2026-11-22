@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 
 import { requireDevice, type DeviceContext } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
@@ -7,6 +8,16 @@ import { createPairingCode, ensureCanAddDevice } from '../pairing.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
 import { roleCan, type Permission } from '../sync/permissions.js';
 import { stateOf } from '../sync/rules.js';
+
+const conflictSelect = {
+  id: true,
+  kind: true,
+  eventId: true,
+  details: true,
+  createdAt: true,
+  reviewedAt: true,
+  reviewedByUserId: true,
+} as const;
 
 const forbidden = (code: string, message: string) => new HttpError(403, code, message);
 
@@ -86,6 +97,46 @@ export function branchRouter(db: Db, notifier: BranchNotifier = noopNotifier): R
     });
     notifier.disconnectDevice(target.id);
     res.json(revoked);
+  });
+
+  /// Conflictos que el servidor aceptó pero conviene revisar (doble cobro,
+  /// cierre de turno descartado). Por defecto solo los pendientes.
+  router.get('/conflicts', async (req, res) => {
+    const device = requireDevice(req.device);
+    const all = req.query.all === '1' || req.query.all === 'true';
+    const where = { branchId: device.branchId };
+    const [conflicts, pending] = await Promise.all([
+      db.syncConflict.findMany({
+        where: all ? where : { ...where, reviewedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: conflictSelect,
+      }),
+      db.syncConflict.count({ where: { ...where, reviewedAt: null } }),
+    ]);
+    res.json({ conflicts, pending });
+  });
+
+  router.post('/conflicts/:id/review', async (req, res) => {
+    const device = requireDevice(req.device);
+    const id = z.uuid().safeParse(req.params.id);
+    const target = id.success
+      ? await db.syncConflict.findUnique({ where: { id: id.data } })
+      : null;
+    if (!target || target.branchId !== device.branchId) {
+      throw notFound('Conflicto no encontrado');
+    }
+    const reviewed = target.reviewedAt
+      ? target
+      : await db.syncConflict.update({
+          where: { id: target.id },
+          data: { reviewedAt: new Date(), reviewedByUserId: req.header('x-boba-user') ?? null },
+        });
+    res.json({
+      id: reviewed.id,
+      reviewedAt: reviewed.reviewedAt,
+      reviewedByUserId: reviewed.reviewedByUserId,
+    });
   });
 
   return router;

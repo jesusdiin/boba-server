@@ -253,10 +253,14 @@ model SyncConflict {
   eventId   String   @map("event_id") @db.Uuid
   details   Json     @db.JsonB
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Revisado desde la app por un admin/Dueño de la sucursal.
+  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz(3)
+  reviewedByUserId String?   @map("reviewed_by_user_id") @db.Uuid
 
   branch Branch @relation(fields: [branchId], references: [id])
 
   @@index([branchId, createdAt])
+  @@index([branchId, reviewedAt])
   @@map("sync_conflicts")
 }
 

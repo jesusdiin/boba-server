@@ -256,6 +256,8 @@ export async function organizationDetail(db: Db, organizationId: string, now: Da
       kind: c.kind,
       eventId: c.eventId,
       createdAt: c.createdAt,
+      reviewedAt: c.reviewedAt,
+      reviewedByUserId: c.reviewedByUserId,
     })),
     billingEvents,
     audit: audit.map(auditJson),
