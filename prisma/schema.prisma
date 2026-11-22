@@ -582,3 +582,51 @@ model BranchIncomingOrder {
   @@index([branchId, createdAtUtc])
   @@map("branch_incoming_orders")
 }
+
+// --- Panel del operador (boba_admin) ----------------------------------------
+
+/// Persona del equipo de Boba POS que entra al panel (`/v1/ops`).
+model Operator {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// En minúsculas.
+  email        String    @unique
+  name         String
+  /// `scrypt$<salt base64>$<hash base64>`.
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  disabledAt   DateTime? @map("disabled_at") @db.Timestamptz(3)
+
+  sessions OperatorSession[]
+  audit    OperatorAudit[]
+
+  @@map("operators")
+}
+
+/// Sesión del panel; el token en claro solo vive en la cookie.
+model OperatorSession {
+  tokenHash  String   @id @map("token_hash")
+  operatorId String   @map("operator_id") @db.Uuid
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  operator Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@index([operatorId])
+  @@map("operator_sessions")
+}
+
+/// Bitácora de lo que hace un operador (soporte y accesos).
+model OperatorAudit {
+  id             String   @id @default(uuid()) @db.Uuid
+  operatorId     String   @map("operator_id") @db.Uuid
+  action         String
+  organizationId String?  @map("organization_id") @db.Uuid
+  details        Json     @default("{}") @db.JsonB
+  at             DateTime @default(now()) @db.Timestamptz(3)
+
+  operator Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@index([at])
+  @@index([organizationId, at])
+  @@map("operator_audit")
+}

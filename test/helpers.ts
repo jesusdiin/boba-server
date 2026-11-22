@@ -14,9 +14,14 @@ import type { BillingConfig } from '../src/routes/billing.js';
 import { PairingThrottle } from '../src/routes/devices.js';
 
 export const ADMIN_KEY = process.env.ADMIN_API_KEY ?? '';
+/// Origen del panel del operador en los tests (CORS de `/v1/ops`).
+export const PANEL_ORIGIN = 'http://panel.test';
 
 /// App + DB de pruebas; las tablas se vacían antes de cada test.
-export function setupTestApp({ billing }: { billing?: BillingConfig } = {}) {
+export function setupTestApp({
+  billing,
+  requireEventActor,
+}: { billing?: BillingConfig; requireEventActor?: boolean } = {}) {
   const db = createDb(process.env.DATABASE_URL ?? '');
   const logger = pino({ level: 'silent' });
   const notifier = new InProcessBranchNotifier();
@@ -28,6 +33,12 @@ export function setupTestApp({ billing }: { billing?: BillingConfig } = {}) {
     signupThrottle: new PairingThrottle(1000),
     notifier,
     billing,
+    requireEventActor,
+    ops: {
+      origins: [PANEL_ORIGIN],
+      prices: { pro: 34900, max: 79900 },
+      throttle: new PairingThrottle(1000),
+    },
   });
 
   // Servidor HTTP real (puerto efímero) solo para los tests de WebSocket.
@@ -51,7 +62,8 @@ export function setupTestApp({ billing }: { billing?: BillingConfig } = {}) {
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
         'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
-        'branches, billing_events, organizations RESTART IDENTITY CASCADE',
+        'branches, billing_events, organizations, operator_audit, operator_sessions, ' +
+        'operators RESTART IDENTITY CASCADE',
     );
   });
   afterAll(async () => {

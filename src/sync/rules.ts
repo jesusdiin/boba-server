@@ -1,10 +1,16 @@
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { DeviceContext } from '../auth/deviceAuth.js';
 import type { PushedEvent } from '../events/schema.js';
-import { actorAndPermission, roleCan } from './permissions.js';
+import { ACTOR_REQUIRED_TYPES, actorAndPermission, roleCan } from './permissions.js';
 
 export type Tx = Prisma.TransactionClient;
 type Payload = Record<string, unknown>;
+
+export interface RuleOptions {
+  /// `REQUIRE_EVENT_ACTOR`: rechazar cambios de usuarios/catálogo/insumos
+  /// sin actor (salvo al arrancar la sucursal).
+  requireActor?: boolean;
+}
 
 export type RuleResult =
   | {
@@ -124,6 +130,7 @@ export async function applyRules(
   tx: Tx,
   device: DeviceContext,
   event: PushedEvent,
+  options: RuleOptions = {},
 ): Promise<RuleResult> {
   const branchId = device.branchId;
   const payload = structuredClone(event.payload) as Payload;
@@ -174,9 +181,48 @@ export async function applyRules(
     if (!user || row?.isActive === false) {
       return reject('unknown_user', 'Usuario desconocido o inactivo en la sucursal');
     }
-    if (!roleCan(user.status ?? '', required.permission)) {
-      return reject('forbidden', `El rol ${user.status} no puede ${required.permission}`);
+    const role = user.status ?? '';
+    // Lo que hace la caja sin ser admin: marcar agotado un producto, o el
+    // costo nuevo de un insumo al registrar una entrada.
+    let permission = required.permission;
+    if (
+      event.type === 'product.upserted' &&
+      (await onlyChanged(tx, branchId, 'product', event.aggregateId, payload, 'isSoldOut'))
+    ) {
+      permission = 'markSoldOut';
+    } else if (
+      event.type === 'supply.upserted' &&
+      (await onlyChanged(tx, branchId, 'supply', event.aggregateId, payload, 'unitCostCents'))
+    ) {
+      permission = 'inventoryEntries';
     }
+    if (!roleCan(role, permission)) {
+      return reject('forbidden', `El rol ${role} no puede ${permission}`);
+    }
+    // Un Dueño solo lo crea, edita o asciende otro Dueño.
+    if (event.type === 'user.created' || event.type === 'user.updated') {
+      const target = await stateOf(tx, branchId, 'user', event.aggregateId);
+      const touchesOwner = payload.role === 'owner' || target?.status === 'owner';
+      if (touchesOwner && role !== 'owner') {
+        return reject('forbidden', 'Solo un Dueño puede asignar o cambiar a un Dueño');
+      }
+    }
+    // El nombre del negocio es de la organización: solo el Dueño lo cambia
+    // (de un Admin se conserva el vigente; sus datos de sucursal sí pasan).
+    if (event.type === 'branch.details_set' && !roleCan(role, 'manageOrganization')) {
+      const org = await tx.organization.findUnique({
+        where: { id: device.organizationId },
+        select: { name: true },
+      });
+      if (org) payload.businessName = org.name;
+    }
+  } else if (
+    required &&
+    options.requireActor &&
+    ACTOR_REQUIRED_TYPES.has(event.type) &&
+    !(await isBranchBootstrap(tx, device))
+  ) {
+    return reject('actor_required', 'El cambio no dice qué usuario lo hizo; actualiza la app');
   }
 
   switch (event.type) {
@@ -283,6 +329,42 @@ export async function applyRules(
   }
 
   return { ok: true, payload };
+}
+
+/// Arranque de la sucursal: ningún otro equipo ha subido eventos (registro,
+/// configuración inicial y la republicación del primer equipo no tienen
+/// sesión). Una sucursal creada desde `/v1/org` nace con eventos del equipo
+/// que la creó, así que no entra aquí.
+async function isBranchBootstrap(tx: Tx, device: DeviceContext): Promise<boolean> {
+  const other = await tx.event.findFirst({
+    where: { branchId: device.branchId, NOT: { deviceId: device.id } },
+    select: { eventId: true },
+  });
+  return other === null;
+}
+
+/// Respecto de la fila vigente solo cambia [field] (sin contar versión,
+/// fecha de cambio ni actor). Sin fila vigente (alta) → `false`.
+async function onlyChanged(
+  tx: Tx,
+  branchId: string,
+  aggregateType: string,
+  id: string,
+  payload: Payload,
+  field: string,
+): Promise<boolean> {
+  const current = await stateOf(tx, branchId, aggregateType, id);
+  const before = obj(current?.row);
+  if (!before) return false;
+  const ignored = new Set(['v', 'version', 'updatedAtUtc', 'actorUserId', field]);
+  const keys = new Set([...Object.keys(before), ...Object.keys(payload)]);
+  for (const key of keys) {
+    if (ignored.has(key)) continue;
+    if (JSON.stringify(before[key] ?? null) !== JSON.stringify(payload[key] ?? null)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 const json = (row: Payload): Prisma.InputJsonValue => row as Prisma.InputJsonValue;

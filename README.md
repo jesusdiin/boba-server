@@ -50,6 +50,7 @@ pnpm cli projections:rebuild [branchId]          # rehace proyecciones desde eve
 pnpm cli org:show <orgId>                        # plan, estado y uso
 pnpm cli org:plan <orgId> pro active 2026-12-31  # activa/cambia el plan (fecha o "none")
 pnpm cli users:promote-admins [orgId]            # admins → Dueño (tras actualizar la app)
+pnpm cli operator:create <email> "<nombre>"     # acceso al panel boba_admin
 ```
 
 ## API v1
@@ -152,10 +153,40 @@ Solo el Dueño (`owner`) de la sucursal del token; plan vencido → `402`.
 - `POST /v1/org/branches/:id/pairing-codes` → `{code, expiresAt}` (404 si
   no es de la organización)
 
+**Quién hizo el cambio:** `user.*`, catálogo y `supply.upserted` traen
+`actorUserId`; el árbitro valida su rol (`manageUsers` y ser Dueño para
+tocar a un Dueño; `manageCatalog` o `markSoldOut` si solo cambia
+`isSoldOut`; `inventoryAdjust` o `inventoryEntries` si solo cambia el
+costo). En `branch.details_set` de alguien que no es Dueño se conserva el
+nombre del negocio. `REQUIRE_EVENT_ACTOR=true` rechaza los que no traen
+actor (`actor_required`), salvo cuando ningún otro equipo ha subido a la
+sucursal (arranque). Encenderlo cuando todos los equipos estén
+actualizados.
+
 **Roles:** `owner` puede todo; `admin` todo menos `manageOrganization`. Los
 `user.*` de un Dueño se copian tras el commit a las demás sucursales
 (`src/sync/ownerReplication.ts`): `eventId` derivado (UUIDv5, idempotente),
 mismo `deviceId`; quien deja de ser Dueño queda inactivo en las otras.
+
+### Panel del operador (`boba_admin`) — `/v1/ops`
+Sesión por cookie `boba_ops` (HttpOnly, SameSite=Lax, 12 h). CORS con
+credenciales solo para `ADMIN_PANEL_ORIGIN` (lista separada por comas); las
+escrituras exigen JSON y un `Origin` permitido. Alta de operadores con
+`pnpm cli operator:create <email> "<nombre>"` (`POST /v1/admin/operators`).
+- `POST /login {email, password}` · `POST /logout` · `GET /me` ·
+  `POST /me/password {current, next}`
+- `GET /stats`: segmentos (`paid`, `trial`, `courtesy`, `canceled`, `grace`,
+  `lapsed`), MRR estimado (`PLAN_PRICE_PRO_CENTS`, `PLAN_PRICE_MAX_CENTS`),
+  equipos activos, ventas de 30 días, altas por semana, pruebas por vencer e
+  inactivos
+- `GET /organizations?q=&segment=&plan=&page=` · `GET /organizations/:id`
+  (sucursales, equipos, usuarios por rol, ventas por día, conflictos de
+  sync, eventos de cobro, bitácora)
+- Soporte (todo queda en `operator_audit`): `PATCH /organizations/:id/plan`,
+  `POST /organizations/:id/extend-trial {days}`,
+  `POST /organizations/:id/promote-admins`, `POST /branches/:id/pairing-codes`,
+  `POST /branches/:id/rebuild-projections`, `POST /devices/:id/revoke`
+- `GET /audit?page=`
 
 ### Emparejamiento
 `POST /v1/devices/pair {code, deviceName, mode?: "staff"|"kiosk"}` →

@@ -53,7 +53,7 @@ const obj = (v: unknown): Payload | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Payload) : null;
 
 /// Quién hizo la operación (`null`: seed/configuración, sin sesión) y qué
-/// permiso exige. `user.*` y el catálogo no traen actor: no se validan.
+/// permiso exige.
 export function actorAndPermission(
   type: string,
   payload: Payload,
@@ -83,7 +83,35 @@ export function actorAndPermission(
       return { actor: str(payload.userId), permission: 'manageAppearance' };
     case 'branch.details_set':
       return { actor: str(payload.userId), permission: 'manageBusiness' };
+    // `actorUserId`: quién hizo el cambio (la app lo manda desde que existe
+    // el rol Dueño; las versiones viejas no, ver `REQUIRE_EVENT_ACTOR`).
+    case 'user.created':
+    case 'user.updated':
+      return { actor: str(payload.actorUserId), permission: 'manageUsers' };
+    case 'category.upserted':
+    case 'product.upserted':
+    case 'modifier_group.upserted':
+    case 'modifier_option.upserted':
+    case 'product_modifier_group.upserted':
+    case 'product_modifier_group.removed':
+      return { actor: str(payload.actorUserId), permission: 'manageCatalog' };
+    case 'supply.upserted':
+      return { actor: str(payload.actorUserId), permission: 'inventoryAdjust' };
     default:
       return null;
   }
 }
+
+/// Tipos cuyo actor se exige con `REQUIRE_EVENT_ACTOR` (fuera del arranque
+/// de la sucursal): quién cambia usuarios, catálogo e insumos.
+export const ACTOR_REQUIRED_TYPES: ReadonlySet<string> = new Set([
+  'user.created',
+  'user.updated',
+  'category.upserted',
+  'product.upserted',
+  'modifier_group.upserted',
+  'modifier_option.upserted',
+  'product_modifier_group.upserted',
+  'product_modifier_group.removed',
+  'supply.upserted',
+]);

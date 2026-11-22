@@ -8,6 +8,7 @@
  *   pnpm cli devices <branchId>
  *   pnpm cli projections:rebuild [branchId]
  *   pnpm cli org:show <orgId>
+ *   pnpm cli operator:create <email> "<nombre>"   (acceso al panel; reimprime la contraseña si ya existe)
  *   pnpm cli users:promote-admins [orgId]   (admins → Dueño; después de actualizar la app)
  *   pnpm cli org:plan <orgId> <pro|max> <trialing|active|past_due|canceled> [YYYY-MM-DD|none]
  */
@@ -118,6 +119,18 @@ async function main(): Promise<void> {
         branchId: args[0],
       });
       console.log(`Proyecciones reconstruidas desde ${events} eventos`);
+      return;
+    }
+    case 'operator:create': {
+      const [email, name] = args;
+      if (!email || !name) throw new Error('Uso: operator:create <email> "<nombre>"');
+      const op = await admin<{ email: string; password: string }>('POST', '/operators', {
+        email,
+        name,
+      });
+      console.log(`Operador ${op.email}`);
+      console.log(`Contraseña inicial: ${op.password}`);
+      console.log('Cámbiala en el panel (Cuenta). No se vuelve a mostrar.');
       return;
     }
     case 'users:promote-admins': {

@@ -17,6 +17,11 @@ const app = createApp({
   logger,
   notifier,
   signupEnabled: env.SIGNUP_ENABLED,
+  requireEventActor: env.REQUIRE_EVENT_ACTOR,
+  ops: {
+    origins: env.ADMIN_PANEL_ORIGIN,
+    prices: { pro: env.PLAN_PRICE_PRO_CENTS, max: env.PLAN_PRICE_MAX_CENTS },
+  },
   billing: {
     fetchSubscriber: env.REVENUECAT_SECRET_KEY
       ? revenueCatFetcher(env.REVENUECAT_SECRET_KEY)

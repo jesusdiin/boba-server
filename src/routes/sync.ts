@@ -8,7 +8,7 @@ import { planJson } from '../plans.js';
 import type { BranchNotifier } from '../realtime/branchNotifier.js';
 import { insertEvent } from '../sync/events.js';
 import { replicateToOrganization } from '../sync/ownerReplication.js';
-import { applyRules } from '../sync/rules.js';
+import { applyRules, type RuleOptions } from '../sync/rules.js';
 import {
   eventRejection,
   MAX_PUSH_BATCH,
@@ -32,7 +32,11 @@ type Rejected = {
   details?: Record<string, unknown>;
 };
 
-export function syncRouter(db: Db, notifier: BranchNotifier): Router {
+export function syncRouter(
+  db: Db,
+  notifier: BranchNotifier,
+  options: RuleOptions = {},
+): Router {
   const router = Router();
 
   /// Sube un lote de eventos del outbox. Idempotente por `eventId`: un
@@ -101,7 +105,7 @@ export function syncRouter(db: Db, notifier: BranchNotifier): Router {
             continue;
           }
 
-          const verdict = await applyRules(tx, device, e);
+          const verdict = await applyRules(tx, device, e, options);
           if (!verdict.ok) {
             rejected.push({
               eventId: e.eventId,

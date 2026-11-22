@@ -21,7 +21,8 @@ const details = (branchId: string, setAtUtc: string, extra: Record<string, unkno
 describe('branch.details_set (negocio y sucursal)', () => {
   it('actualiza la empresa y la sucursal; el equipo nuevo recibe el nombre', async () => {
     const a = (await t.signup()).body as { token: string; branch: { id: string } };
-    const admin = userCreated('admin');
+    // El nombre del negocio lo cambia el Dueño (ver actor-rules.test.ts).
+    const admin = userCreated('owner');
     await t.push(a.token, [admin]);
     const res = await t.push(a.token, [
       details(a.branch.id, '2026-11-06T15:00:00.000Z', { userId: admin.aggregateId }),

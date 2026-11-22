@@ -1,35 +1,21 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
-import { Prisma } from '../../generated/prisma/client.js';
 import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
 import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
+import { hashPassword, newOperatorPassword } from '../auth/operatorAuth.js';
 import { promoteAdminsToOwners } from '../sync/ownerReplication.js';
 import { rebuildProjections } from '../sync/rules.js';
 import { createPairingCode, ensureCanAddBranch } from '../pairing.js';
-import { entitlementsOf, LimitOverrides, planJson } from '../plans.js';
-
-const PlanName = z.enum(['pro', 'max']);
-const Status = z.enum(['trialing', 'active', 'past_due', 'canceled']);
+import { PlanPatch, updateOrgPlan } from '../orgPlan.js';
+import { entitlementsOf, planJson } from '../plans.js';
 
 const NewOrganization = z.object({
   name: z.string().trim().min(1),
-  plan: PlanName.optional(),
+  plan: z.enum(['pro', 'max']).optional(),
 });
 
-/// Cambio manual del plan (cobro a mano mientras no hay pasarela).
-const PlanPatch = z
-  .object({
-    plan: PlanName,
-    subscriptionStatus: Status,
-    /// ISO 8601; `null` = sin vencimiento.
-    currentPeriodEnd: z.iso.datetime({ offset: true }).nullable(),
-    limitOverrides: LimitOverrides.nullable(),
-    /// `manual` evita que la tienda lo cambie (salvo una compra vigente).
-    billingSource: z.enum(['manual', 'store']),
-  })
-  .partial();
 const NewBranch = z.object({
   name: z.string().trim().min(1),
   timezoneId: z.string().min(1).optional(),
@@ -71,25 +57,7 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
   });
 
   router.patch('/organizations/:orgId/plan', async (req, res) => {
-    const body = PlanPatch.parse(req.body);
-    const org = await db.organization.findUnique({ where: { id: req.params.orgId } });
-    if (!org) throw notFound('Organización no encontrada');
-    const updated = await db.organization.update({
-      where: { id: org.id },
-      data: {
-        plan: body.plan,
-        subscriptionStatus: body.subscriptionStatus,
-        currentPeriodEnd:
-          body.currentPeriodEnd === undefined
-            ? undefined
-            : body.currentPeriodEnd && new Date(body.currentPeriodEnd),
-        limitOverrides:
-          body.limitOverrides === undefined
-            ? undefined
-            : (body.limitOverrides ?? Prisma.DbNull),
-        billingSource: body.billingSource,
-      },
-    });
+    const updated = await updateOrgPlan(db, req.params.orgId, PlanPatch.parse(req.body));
     res.json({ id: updated.id, plan: planJson(entitlementsOf(updated, new Date())) });
   });
 
@@ -145,6 +113,23 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
     const branchId = z.uuid().optional().parse(req.body?.branchId);
     const events = await rebuildProjections(db, branchId);
     res.json({ events });
+  });
+
+  /// Alta de un operador del panel (boba_admin). La contraseña inicial solo
+  /// sale en esta respuesta; se cambia desde el panel.
+  router.post('/operators', async (req, res) => {
+    const body = z
+      .object({ email: z.string().trim().toLowerCase().email(), name: z.string().trim().min(1) })
+      .parse(req.body);
+    const password = newOperatorPassword();
+    const operator = await db.operator.upsert({
+      where: { email: body.email },
+      create: { ...body, passwordHash: await hashPassword(password) },
+      // Ya existía: se reactiva con contraseña nueva (recuperar acceso).
+      update: { name: body.name, passwordHash: await hashPassword(password), disabledAt: null },
+    });
+    await db.operatorSession.deleteMany({ where: { operatorId: operator.id } });
+    res.status(201).json({ id: operator.id, email: operator.email, password });
   });
 
   /// Migración al rol Dueño: los admins activos pasan a `owner` y se

@@ -13,6 +13,9 @@ import {
   billingWebhookRouter,
   type BillingConfig,
 } from './routes/billing.js';
+import { opsCors } from './auth/operatorAuth.js';
+import type { Prices } from './ops/stats.js';
+import { opsRouter } from './routes/ops.js';
 import { orgRouter } from './routes/org.js';
 import { branchRouter } from './routes/branch.js';
 import { devicesRouter, PairingThrottle } from './routes/devices.js';
@@ -33,6 +36,10 @@ export interface AppDeps {
   signupThrottle?: PairingThrottle;
   /// Cobro en la app (RevenueCat); sin él, `/v1/billing/*` responde 503.
   billing?: BillingConfig;
+  /// Rechazar cambios de usuarios/catálogo sin actor (`REQUIRE_EVENT_ACTOR`).
+  requireEventActor?: boolean;
+  /// Panel del operador: orígenes con CORS y precios para el MRR.
+  ops?: { origins?: string[]; prices?: Prices; throttle?: PairingThrottle };
 }
 
 /// App Express sin `listen` (los tests la usan con supertest).
@@ -45,6 +52,8 @@ export function createApp({
   signupEnabled = true,
   signupThrottle,
   billing = {},
+  requireEventActor = false,
+  ops = {},
 }: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -57,6 +66,15 @@ export function createApp({
   });
 
   app.use('/v1/admin', adminAuth(adminApiKey), adminRouter(db, notifier));
+  // Panel del operador (boba_admin, otro origen): CORS con cookie de sesión.
+  app.use(
+    '/v1/ops',
+    opsCors(ops.origins ?? []),
+    opsRouter(db, notifier, {
+      prices: ops.prices ?? { pro: 34900 },
+      throttle: ops.throttle,
+    }),
+  );
   app.use('/v1/devices', devicesRouter(db, pairingThrottle));
   app.use(
     '/v1/signup',
@@ -64,7 +82,7 @@ export function createApp({
   );
   // Plan vencido: la nube se pausa (402), pero `/v1/branch` sigue abierto
   // para poder revocar equipos y ajustarse al límite.
-  app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier));
+  app.use('/v1/sync', deviceAuth(db), requireActivePlan, syncRouter(db, notifier, { requireActor: requireEventActor }));
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
   app.use('/v1/org', deviceAuth(db), requireActivePlan, orgRouter(db, notifier));
   app.use('/v1/billing', billingWebhookRouter(db, billing));
