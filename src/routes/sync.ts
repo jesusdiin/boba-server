@@ -15,6 +15,7 @@ import {
   PushBody,
   PushedEvent,
 } from '../events/schema.js';
+import { withEventDefaults } from '../sync/rowDefaults.js';
 
 const PullQuery = z.object({
   after: z
@@ -168,7 +169,8 @@ export function syncRouter(
         type: e.type,
         aggregateType: e.aggregateType,
         aggregateId: e.aggregateId,
-        payload: e.payload,
+        // Eventos viejos sin los booleanos que la app exige.
+        payload: withEventDefaults(e.type, e.payload),
         createdAtUtc: e.deviceCreatedAt.toISOString(),
         receivedAt: e.receivedAt.toISOString(),
       })),

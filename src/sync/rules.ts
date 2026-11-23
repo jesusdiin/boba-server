@@ -2,6 +2,7 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import type { DeviceContext } from '../auth/deviceAuth.js';
 import type { PushedEvent } from '../events/schema.js';
 import { ACTOR_REQUIRED_TYPES, actorAndPermission, roleCan } from './permissions.js';
+import { withEventDefaults, withRowDefaults } from './rowDefaults.js';
 
 export type Tx = Prisma.TransactionClient;
 type Payload = Record<string, unknown>;
@@ -418,13 +419,17 @@ async function onlyChanged(
   field: string,
 ): Promise<boolean> {
   const current = await stateOf(tx, branchId, aggregateType, id);
-  const before = obj(current?.row);
-  if (!before) return false;
+  const stored = obj(current?.row);
+  if (!stored) return false;
+  // Ambos lados con los mismos valores por omisión (la fila guardada ya los
+  // trae; un payload de una app vieja, no).
+  const before = withRowDefaults(aggregateType, stored);
+  const after = withRowDefaults(aggregateType, payload);
   const ignored = new Set(['v', 'version', 'updatedAtUtc', 'actorUserId', field]);
-  const keys = new Set([...Object.keys(before), ...Object.keys(payload)]);
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   for (const key of keys) {
     if (ignored.has(key)) continue;
-    if (JSON.stringify(before[key] ?? null) !== JSON.stringify(payload[key] ?? null)) {
+    if (JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null)) {
       return false;
     }
   }
@@ -865,7 +870,8 @@ export async function project(
     });
   };
 
-  const row = rowOf(payload);
+  // Filas de versiones viejas de la app: completas antes de proyectar.
+  const row = withEventDefaults(type, rowOf(payload));
   const id = str(row.id) ?? aggregateId;
   const aggregateType = VERSIONED[type];
   if (aggregateType) await upsert(aggregateType, aggregateId, row);

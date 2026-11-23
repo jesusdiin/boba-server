@@ -3,17 +3,22 @@ import { Router } from 'express';
 import { requireDevice } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
 import { HttpError, notFound } from '../errors.js';
+import { withRowDefaults } from '../sync/rowDefaults.js';
 
 export const SNAPSHOT_VERSION = 1;
 
 type Row = Record<string, unknown>;
 
-const rowsOf = (values: { row: unknown }[]): Row[] => {
-  return values.map((value) =>
-    value.row && typeof value.row === 'object' && !Array.isArray(value.row)
-      ? (value.row as Row)
-      : {},
-  );
+/// Filas de la proyección; con [kind], completas con los booleanos que la
+/// app exige (filas guardadas por versiones viejas de la app).
+const rowsOf = (values: { row: unknown }[], kind?: string): Row[] => {
+  return values.map((value) => {
+    const row =
+      value.row && typeof value.row === 'object' && !Array.isArray(value.row)
+        ? (value.row as Row)
+        : {};
+    return kind ? withRowDefaults(kind, row) : row;
+  });
 };
 
 /// Snapshot de arranque para un dispositivo nuevo. No es el log: es el estado
@@ -157,13 +162,13 @@ export function snapshotRouter(db: Db): Router {
           : null;
 
         const tables = {
-          categories: rowsOf(categories),
-          products: rowsOf(products),
-          modifier_groups: rowsOf(modifierGroups),
-          modifier_options: rowsOf(modifierOptions),
+          categories: rowsOf(categories, 'category'),
+          products: rowsOf(products, 'product'),
+          modifier_groups: rowsOf(modifierGroups, 'modifier_group'),
+          modifier_options: rowsOf(modifierOptions, 'modifier_option'),
           product_modifier_groups: rowsOf(productModifierGroups),
-          supplies: rowsOf(supplies),
-          users: rowsOf(users),
+          supplies: rowsOf(supplies, 'supply'),
+          users: rowsOf(users, 'user'),
           shifts: rowsOf(shifts),
           sales: rowsOf(sales),
           sale_items: rowsOf(saleItems),
