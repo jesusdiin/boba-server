@@ -3,7 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
-import { PairingThrottle } from '../src/routes/devices.js';
+import { MemoryThrottle } from '../src/throttle.js';
 import { ADMIN_KEY, setupTestApp, userCreated } from './helpers.js';
 
 const t = setupTestApp();
@@ -48,7 +48,7 @@ describe('registro de negocios (POST /v1/signup)', () => {
       db: t.db,
       adminApiKey: ADMIN_KEY,
       logger: pino({ level: 'silent' }),
-      signupThrottle: new PairingThrottle(2),
+      signupThrottle: new MemoryThrottle(2),
     });
     const body = { organizationName: 'X', branchName: 'Y', deviceName: 'Z' };
     expect((await request(app).post('/v1/signup').send(body)).status).toBe(201);

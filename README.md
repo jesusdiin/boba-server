@@ -291,8 +291,20 @@ Solo avisos, nunca datos de negocio (los datos se bajan con el pull):
 - Revocar el dispositivo cierra el socket con código **4401**.
 - Ping cada 30 s; un socket sin pong se cierra.
 
-El reparto es en memoria (`InProcessBranchNotifier`): sirve con una sola
-instancia del servidor.
+El reparto usa Postgres `LISTEN/NOTIFY` (`PgBranchNotifier`, canal
+`boba_realtime`): cada instancia entrega a sus sockets y publica para las
+demás, así que funciona con una o varias instancias detrás de un balanceador.
+`REALTIME_BACKEND=memory` usa el reparto en memoria (una sola instancia).
+
+### Frenos e IP real
+Los frenos de intentos (alta de negocios 5/h por IP, emparejamiento y login
+del panel 10/15 min, códigos por correo 3/15 min por usuario, cupones 10/15
+min por equipo) se guardan en Postgres (`rate_limits`, `src/throttle.ts`) y
+se comparten entre instancias; los vencidos se purgan cada hora.
+
+Detrás de nginx, `TRUST_PROXY` (por defecto `loopback`) hace que `req.ip` sea
+la IP real; nginx debe mandar
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`.
 
 ```bash
 websocat -H "Authorization: Bearer $TOKEN" ws://localhost:4000/v1/ws

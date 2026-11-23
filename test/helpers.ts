@@ -12,7 +12,7 @@ import { InProcessBranchNotifier } from '../src/realtime/branchNotifier.js';
 import { attachRealtime } from '../src/realtime/wsServer.js';
 import type { BillingConfig } from '../src/routes/billing.js';
 import { RecordingMailer } from '../src/mail/mailer.js';
-import { PairingThrottle } from '../src/routes/devices.js';
+import { MemoryThrottle } from '../src/throttle.js';
 
 export const ADMIN_KEY = process.env.ADMIN_API_KEY ?? '';
 /// Origen del panel del operador en los tests (CORS de `/v1/ops`).
@@ -38,18 +38,18 @@ export function setupTestApp({
     db,
     adminApiKey: ADMIN_KEY,
     logger,
-    pairingThrottle: new PairingThrottle(1000),
-    signupThrottle: new PairingThrottle(1000),
+    pairingThrottle: new MemoryThrottle(1000),
+    signupThrottle: new MemoryThrottle(1000),
     notifier,
     billing,
     requireEventActor,
     mailer,
-    accountThrottle: new PairingThrottle(accountSends),
-    couponThrottle: new PairingThrottle(couponFailures),
+    accountThrottle: new MemoryThrottle(accountSends),
+    couponThrottle: new MemoryThrottle(couponFailures),
     ops: {
       origins: [PANEL_ORIGIN],
       prices: { pro: 14900, max: 34900 },
-      throttle: new PairingThrottle(1000),
+      throttle: new MemoryThrottle(1000),
     },
   });
 
@@ -75,7 +75,7 @@ export function setupTestApp({
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
         'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
-        'branches, billing_events, owner_accounts, email_codes, coupon_redemptions, coupons, organizations, operator_audit, operator_sessions, ' +
+        'branches, billing_events, owner_accounts, email_codes, coupon_redemptions, coupons, rate_limits, organizations, operator_audit, operator_sessions, ' +
         'operators RESTART IDENTITY CASCADE',
     );
   });

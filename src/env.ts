@@ -40,6 +40,18 @@ const Env = z.object({
   SMTP_USER: z.string().min(1).optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().min(3).default('Boba POS <no-reply@diino.mx>'),
+  /// Proxy del que se confía `X-Forwarded-For` (lo que acepta Express:
+  /// `loopback`, un número de saltos, IPs, o `false`). Con nginx en el mismo
+  /// equipo, `loopback`: así `req.ip` es la IP real del cliente.
+  TRUST_PROXY: z
+    .string()
+    .default('loopback')
+    .transform((v): string | number | boolean =>
+      v === 'false' ? false : v === 'true' ? true : /^\d+$/.test(v) ? Number(v) : v,
+    ),
+  /// Avisos en tiempo real: `postgres` (LISTEN/NOTIFY, sirve con una o varias
+  /// instancias) o `memory` (solo una instancia).
+  REALTIME_BACKEND: z.enum(['postgres', 'memory']).default('postgres'),
   PORT: z.coerce.number().int().min(0).default(4000),
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])

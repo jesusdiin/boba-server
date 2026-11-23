@@ -6,12 +6,36 @@ import { createDb } from './db.js';
 import { loadEnv } from './env.js';
 import { ConsoleMailer, SmtpMailer } from './mail/mailer.js';
 import { InProcessBranchNotifier } from './realtime/branchNotifier.js';
+import { PgBranchNotifier } from './realtime/pgNotifier.js';
 import { attachRealtime } from './realtime/wsServer.js';
+import { DbThrottle, purgeExpiredThrottles } from './throttle.js';
 
 const env = loadEnv();
 const logger = pino({ level: env.LOG_LEVEL });
 const db = createDb(env.DATABASE_URL);
-const notifier = new InProcessBranchNotifier();
+// Avisos en tiempo real: con Postgres llegan a todas las instancias.
+const pgNotifier =
+  env.REALTIME_BACKEND === 'postgres'
+    ? new PgBranchNotifier(db, env.DATABASE_URL, logger)
+    : null;
+const notifier = pgNotifier ?? new InProcessBranchNotifier();
+await pgNotifier?.start();
+
+// Frenos compartidos entre instancias (tabla rate_limits).
+const MIN = 60 * 1000;
+const throttles = {
+  signup: new DbThrottle(db, 'signup', 5, 60 * MIN),
+  pair: new DbThrottle(db, 'pair', 10, 15 * MIN),
+  ops: new DbThrottle(db, 'ops-login', 10, 15 * MIN),
+  account: new DbThrottle(db, 'account', 3, 15 * MIN),
+  coupon: new DbThrottle(db, 'coupon', 10, 15 * MIN),
+};
+const purge = setInterval(() => {
+  purgeExpiredThrottles(db).catch((err: unknown) =>
+    logger.warn({ err }, 'purga de frenos'),
+  );
+}, 60 * MIN);
+purge.unref();
 if (!env.SMTP_HOST && process.env.NODE_ENV === 'production') {
   logger.warn('Sin SMTP_HOST: los códigos de la cuenta del Dueño solo van al log');
 }
@@ -32,7 +56,13 @@ const app = createApp({
   signupEnabled: env.SIGNUP_ENABLED,
   requireEventActor: env.REQUIRE_EVENT_ACTOR,
   mailer,
+  trustProxy: env.TRUST_PROXY,
+  pairingThrottle: throttles.pair,
+  signupThrottle: throttles.signup,
+  accountThrottle: throttles.account,
+  couponThrottle: throttles.coupon,
   ops: {
+    throttle: throttles.ops,
     origins: env.ADMIN_PANEL_ORIGIN,
     prices: { pro: env.PLAN_PRICE_PRO_CENTS, max: env.PLAN_PRICE_MAX_CENTS },
   },
@@ -52,6 +82,8 @@ const realtime = attachRealtime(server, { db, notifier, logger });
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'cerrando');
   realtime.close();
+  clearInterval(purge);
+  await pgNotifier?.close();
   server.close();
   await db.$disconnect();
   process.exit(0);

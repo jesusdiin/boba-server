@@ -43,7 +43,7 @@ import {
 import { promoteAdminsToOwners } from '../sync/ownerReplication.js';
 import { rebuildProjections } from '../sync/rules.js';
 import { sha256 } from '../tokens.js';
-import { PairingThrottle } from './devices.js';
+import { MemoryThrottle, type Throttle } from '../throttle.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -71,7 +71,7 @@ const ExtendTrial = z.object({ days: z.number().int().min(1).max(90) });
 
 export interface OpsConfig {
   prices: Prices;
-  throttle?: PairingThrottle;
+  throttle?: Throttle;
 }
 
 /// API del panel del operador (boba_admin): estadísticas del sistema,
@@ -80,7 +80,7 @@ export interface OpsConfig {
 export function opsRouter(
   db: Db,
   notifier: BranchNotifier = noopNotifier,
-  { prices, throttle = new PairingThrottle(10, 15 * 60 * 1000) }: OpsConfig,
+  { prices, throttle = new MemoryThrottle(10, 15 * 60 * 1000) }: OpsConfig,
 ): Router {
   const router = Router();
 
@@ -99,16 +99,16 @@ export function opsRouter(
   router.post('/login', async (req, res) => {
     const ip = req.ip ?? 'unknown';
     const body = Login.parse(req.body);
-    throttle.ensureAllowed(ip);
-    throttle.ensureAllowed(`email:${body.email}`);
+    await throttle.ensureAllowed(ip);
+    await throttle.ensureAllowed(`email:${body.email}`);
     const operator = await db.operator.findUnique({ where: { email: body.email } });
     const ok =
       operator !== null &&
       operator.disabledAt === null &&
       (await verifyPassword(body.password, operator.passwordHash));
     if (!operator || !ok) {
-      throttle.recordFailure(ip);
-      throttle.recordFailure(`email:${body.email}`);
+      await throttle.recordFailure(ip);
+      await throttle.recordFailure(`email:${body.email}`);
       throw new HttpError(401, 'invalid_credentials', 'Correo o contraseña incorrectos');
     }
     setSessionCookie(req, res, await createSession(db, operator.id));

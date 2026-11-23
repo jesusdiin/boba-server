@@ -10,7 +10,7 @@ import { codeEmail, type Mailer } from '../mail/mailer.js';
 import { stateOf } from '../sync/rules.js';
 import { safeEqual, sha256 } from '../tokens.js';
 import { requireBranchAdmin } from './branch.js';
-import { PairingThrottle } from './devices.js';
+import { MemoryThrottle, type Throttle } from '../throttle.js';
 
 type Purpose = 'link_email' | 'reset_pin';
 
@@ -34,14 +34,14 @@ export function maskEmail(email: string): string {
 export interface AccountOptions {
   mailer: Mailer;
   /// Envíos por usuario (3 cada 15 min por defecto).
-  sendThrottle?: PairingThrottle;
+  sendThrottle?: Throttle;
 }
 
 /// Cuenta del Dueño: su correo verificado y el cambio de PIN con un código
 /// enviado a ese correo. Autenticado con el token del equipo.
 export function accountRouter(
   db: Db,
-  { mailer, sendThrottle = new PairingThrottle(3, 15 * 60 * 1000) }: AccountOptions,
+  { mailer, sendThrottle = new MemoryThrottle(3, 15 * 60 * 1000) }: AccountOptions,
 ): Router {
   const router = Router();
 
@@ -49,8 +49,8 @@ export function accountRouter(
     device: DeviceContext,
     { userId, email, purpose }: { userId: string; email: string; purpose: Purpose },
   ): Promise<void> {
-    sendThrottle.ensureAllowed(`user:${userId}`);
-    sendThrottle.recordFailure(`user:${userId}`);
+    await sendThrottle.ensureAllowed(`user:${userId}`);
+    await sendThrottle.recordFailure(`user:${userId}`);
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const org = await db.organization.findUniqueOrThrow({
       where: { id: device.organizationId },

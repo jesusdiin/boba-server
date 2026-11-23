@@ -6,7 +6,7 @@ import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { createDevice, pairResponse } from '../pairing.js';
 import { trialEnd } from '../plans.js';
-import { PairingThrottle } from './devices.js';
+import { MemoryThrottle, type Throttle } from '../throttle.js';
 
 const SignupBody = z.object({
   organizationName: z.string().trim().min(1).max(80),
@@ -24,8 +24,8 @@ export function signupRouter(
   db: Db,
   {
     enabled = true,
-    throttle = new PairingThrottle(5, 60 * 60 * 1000),
-  }: { enabled?: boolean; throttle?: PairingThrottle } = {},
+    throttle = new MemoryThrottle(5, 60 * 60 * 1000),
+  }: { enabled?: boolean; throttle?: Throttle } = {},
 ): Router {
   const router = Router();
 
@@ -34,10 +34,10 @@ export function signupRouter(
       throw new HttpError(403, 'signup_disabled', 'El registro de negocios está cerrado');
     }
     const ip = req.ip ?? 'unknown';
-    throttle.ensureAllowed(ip);
+    await throttle.ensureAllowed(ip);
     const body = SignupBody.parse(req.body);
     // Cada registro cuenta (no solo los fallidos): frena altas en masa.
-    throttle.recordFailure(ip);
+    await throttle.recordFailure(ip);
 
     const result = await db.$transaction(async (tx) => {
       // Todo negocio nuevo arranca con la prueba del plan Pro.

@@ -21,7 +21,8 @@ import type { Prices } from './ops/stats.js';
 import { opsRouter } from './routes/ops.js';
 import { orgRouter } from './routes/org.js';
 import { branchRouter } from './routes/branch.js';
-import { devicesRouter, PairingThrottle } from './routes/devices.js';
+import { devicesRouter } from './routes/devices.js';
+import type { Throttle } from './throttle.js';
 import { mediaRouter } from './routes/media.js';
 import { signupRouter } from './routes/signup.js';
 import { snapshotRouter } from './routes/snapshot.js';
@@ -31,24 +32,26 @@ export interface AppDeps {
   db: Db;
   adminApiKey: string;
   logger: Logger;
-  pairingThrottle?: PairingThrottle;
+  pairingThrottle?: Throttle;
   /// Avisos de tiempo real tras cada push aceptado (sin él, no-op).
   notifier?: BranchNotifier;
   /// Registro de negocios desde la app (`POST /v1/signup`).
   signupEnabled?: boolean;
-  signupThrottle?: PairingThrottle;
+  signupThrottle?: Throttle;
   /// Cobro en la app (RevenueCat); sin él, `/v1/billing/*` responde 503.
   billing?: BillingConfig;
   /// Rechazar cambios de usuarios/catálogo sin actor (`REQUIRE_EVENT_ACTOR`).
   requireEventActor?: boolean;
   /// Panel del operador: orígenes con CORS y precios para el MRR.
-  ops?: { origins?: string[]; prices?: Prices; throttle?: PairingThrottle };
+  ops?: { origins?: string[]; prices?: Prices; throttle?: Throttle };
   /// Correos de la cuenta del Dueño; sin él, van al log (desarrollo).
   mailer?: Mailer;
   /// Envíos de códigos por usuario (pruebas).
-  accountThrottle?: PairingThrottle;
+  accountThrottle?: Throttle;
   /// Cupones inexistentes por equipo (pruebas).
-  couponThrottle?: PairingThrottle;
+  couponThrottle?: Throttle;
+  /// `app.set('trust proxy', …)`: de quién se cree `X-Forwarded-For`.
+  trustProxy?: string | number | boolean;
 }
 
 /// Headers con credenciales: se registran como `[Redacted]`.
@@ -74,8 +77,11 @@ export function createApp({
   mailer,
   accountThrottle,
   couponThrottle,
+  trustProxy = false,
 }: AppDeps): Express {
   const app = express();
+  // Detrás de nginx: la IP real del cliente (frenos por IP).
+  app.set('trust proxy', trustProxy);
   app.disable('x-powered-by');
   // Nunca al log: tokens de equipo, cookie del panel ni la llave admin.
   app.use(pinoHttp({ logger: logger.child({}, { redact: REDACTED_HEADERS }) }));

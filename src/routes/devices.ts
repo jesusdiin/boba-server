@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { createDevice, pairResponse } from '../pairing.js';
+import { MemoryThrottle, type Throttle } from '../throttle.js';
 import { normalizePairingCode, sha256 } from '../tokens.js';
 
 const PairBody = z.object({
@@ -12,45 +13,14 @@ const PairBody = z.object({
   mode: z.enum(['staff', 'kiosk']).default('staff'),
 });
 
-/// Freno simple contra adivinar códigos: N intentos fallidos por IP por
-/// ventana. En memoria (una instancia); suficiente para la Fase 1.
-export class PairingThrottle {
-  private readonly failures = new Map<string, { count: number; resetAt: number }>();
-
-  constructor(
-    private readonly maxFailures = 10,
-    private readonly windowMs = 15 * 60 * 1000,
-  ) {}
-
-  ensureAllowed(ip: string, now = Date.now()): void {
-    const entry = this.failures.get(ip);
-    if (entry && entry.resetAt > now && entry.count >= this.maxFailures) {
-      throw new HttpError(
-        429,
-        'too_many_attempts',
-        'Demasiados intentos; espera unos minutos',
-      );
-    }
-  }
-
-  recordFailure(ip: string, now = Date.now()): void {
-    const entry = this.failures.get(ip);
-    if (!entry || entry.resetAt <= now) {
-      this.failures.set(ip, { count: 1, resetAt: now + this.windowMs });
-    } else {
-      entry.count++;
-    }
-  }
-}
-
-export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router {
+export function devicesRouter(db: Db, throttle: Throttle = new MemoryThrottle()): Router {
   const router = Router();
 
   /// Canjea un código de sucursal por un token de dispositivo. El token en
   /// claro solo viaja en esta respuesta.
   router.post('/pair', async (req, res) => {
     const ip = req.ip ?? 'unknown';
-    throttle.ensureAllowed(ip);
+    await throttle.ensureAllowed(ip);
     const body = PairBody.parse(req.body);
     const codeHash = sha256(normalizePairingCode(body.code));
 
@@ -78,7 +48,7 @@ export function devicesRouter(db: Db, throttle = new PairingThrottle()): Router 
     });
 
     if (!result) {
-      throttle.recordFailure(ip);
+      await throttle.recordFailure(ip);
       throw new HttpError(400, 'invalid_code', 'Código inválido, usado o vencido');
     }
 

@@ -722,3 +722,13 @@ model CouponRedemption {
   @@index([organizationId])
   @@map("coupon_redemptions")
 }
+
+/// Frenos de intentos compartidos entre instancias (`src/throttle.ts`).
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime @map("reset_at") @db.Timestamptz(3)
+
+  @@index([resetAt])
+  @@map("rate_limits")
+}

@@ -12,13 +12,13 @@ import {
   type BranchNotifier,
 } from '../realtime/branchNotifier.js';
 import { requireBranchAdmin } from './branch.js';
-import { PairingThrottle } from './devices.js';
+import { MemoryThrottle, type Throttle } from '../throttle.js';
 
 /// Canje de cupones desde la app (solo el Dueño). Sin `requireActivePlan`:
 /// un plan vencido puede reactivarse con un código.
 export function couponsRouter(
   db: Db,
-  throttle = new PairingThrottle(10, 15 * 60 * 1000),
+  throttle: Throttle = new MemoryThrottle(10, 15 * 60 * 1000),
   notifier: BranchNotifier = noopNotifier,
 ): Router {
   const router = Router();
@@ -27,7 +27,7 @@ export function couponsRouter(
     const device = requireDevice(req.device);
     await requireBranchAdmin(db, device, req.header('x-boba-user'), 'manageOrganization');
     const key = `device:${device.id}`;
-    throttle.ensureAllowed(key);
+    await throttle.ensureAllowed(key);
     const { code } = z.object({ code: z.string().trim().min(1).max(64) }).parse(req.body);
     try {
       const { org } = await db.$transaction((tx) =>
@@ -39,7 +39,7 @@ export function couponsRouter(
     } catch (e) {
       // Solo los códigos que no existen cuentan para el freno (adivinar).
       if (e instanceof HttpError && e.code === 'invalid_coupon')
-        throttle.recordFailure(key);
+        await throttle.recordFailure(key);
       throw e;
     }
   });
