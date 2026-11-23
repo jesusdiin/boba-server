@@ -296,6 +296,12 @@ El reparto usa Postgres `LISTEN/NOTIFY` (`PgBranchNotifier`, canal
 demás, así que funciona con una o varias instancias detrás de un balanceador.
 `REALTIME_BACKEND=memory` usa el reparto en memoria (una sola instancia).
 
+### Fotos (`/v1/media`)
+La app las sube cuadradas (800×800 JPEG, ~60–120 KB; el negocio elige el
+encuadre). Una vez al día se borran las que ningún producto ni sabor del
+negocio usa y tienen más de 7 días (`src/media/cleanup.ts`): la que se
+reemplazó, la que se quitó o la de un producto que nunca se guardó.
+
 ### Frenos e IP real
 Los frenos de intentos (alta de negocios 5/h por IP, emparejamiento y login
 del panel 10/15 min, códigos por correo 3/15 min por usuario, cupones 10/15

@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { revenueCatFetcher } from './billing/revenuecat.js';
 import { createDb } from './db.js';
 import { loadEnv } from './env.js';
+import { purgeUnusedMedia } from './media/cleanup.js';
 import { ConsoleMailer, SmtpMailer } from './mail/mailer.js';
 import { InProcessBranchNotifier } from './realtime/branchNotifier.js';
 import { PgBranchNotifier } from './realtime/pgNotifier.js';
@@ -36,6 +37,17 @@ const purge = setInterval(() => {
   );
 }, 60 * MIN);
 purge.unref();
+
+// Fotos que ya nadie usa (se cambió, se quitó o nunca se guardó el producto).
+const DAY = 24 * 60 * MIN;
+const purgeMedia = () =>
+  purgeUnusedMedia(db)
+    .then((n) => n > 0 && logger.info({ deleted: n }, 'fotos sin usar borradas'))
+    .catch((err: unknown) => logger.warn({ err }, 'limpieza de fotos'));
+const firstMediaPurge = setTimeout(() => void purgeMedia(), 10 * MIN);
+firstMediaPurge.unref();
+const mediaPurge = setInterval(() => void purgeMedia(), DAY);
+mediaPurge.unref();
 if (!env.SMTP_HOST && process.env.NODE_ENV === 'production') {
   logger.warn('Sin SMTP_HOST: los códigos de la cuenta del Dueño solo van al log');
 }
@@ -83,6 +95,8 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'cerrando');
   realtime.close();
   clearInterval(purge);
+  clearInterval(mediaPurge);
+  clearTimeout(firstMediaPurge);
   await pgNotifier?.close();
   server.close();
   await db.$disconnect();
