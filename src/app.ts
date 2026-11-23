@@ -92,7 +92,7 @@ export function createApp({
     '/v1/ops',
     opsCors(ops.origins ?? []),
     opsRouter(db, notifier, {
-      prices: ops.prices ?? { pro: 34900 },
+      prices: ops.prices ?? { pro: 14900, max: 34900 },
       throttle: ops.throttle,
     }),
   );

@@ -48,7 +48,7 @@ export function setupTestApp({
     couponThrottle: new PairingThrottle(couponFailures),
     ops: {
       origins: [PANEL_ORIGIN],
-      prices: { pro: 34900, max: 79900 },
+      prices: { pro: 14900, max: 34900 },
       throttle: new PairingThrottle(1000),
     },
   });

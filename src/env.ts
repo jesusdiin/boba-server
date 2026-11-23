@@ -31,8 +31,8 @@ const Env = z.object({
         .filter(Boolean),
     ),
   /// Precio mensual por plan (centavos MXN) para el MRR estimado del panel.
-  PLAN_PRICE_PRO_CENTS: z.coerce.number().int().min(0).default(34900),
-  PLAN_PRICE_MAX_CENTS: z.coerce.number().int().min(0).optional(),
+  PLAN_PRICE_PRO_CENTS: z.coerce.number().int().min(0).default(14900),
+  PLAN_PRICE_MAX_CENTS: z.coerce.number().int().min(0).default(34900),
   /// Correo saliente (códigos de la cuenta del Dueño). Sin `SMTP_HOST`, los
   /// correos van al log: solo para desarrollo.
   SMTP_HOST: z.string().min(1).optional(),

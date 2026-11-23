@@ -138,7 +138,7 @@ describe('estadísticas y negocios', () => {
     const stats = (await agent.get('/v1/ops/stats')).body;
     expect(stats.organizations).toBe(3);
     expect(stats.bySegment).toMatchObject({ paid: 1, trial: 1, lapsed: 1 });
-    expect(stats.mrrCents).toBe(79900);
+    expect(stats.mrrCents).toBe(34900);
     expect(stats.sales30dCents).toBe(6500);
     expect(stats.devices.active24h).toBeGreaterThanOrEqual(1);
     expect(stats.signups).toHaveLength(12);
