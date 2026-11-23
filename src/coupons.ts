@@ -172,3 +172,68 @@ export function couponJson(c: Coupon, now: Date) {
     status: couponStatus(c, now),
   };
 }
+
+/// El negocio sigue con el plan que le dio este canje (nadie lo cambió).
+export function stillFromCoupon(
+  org: Pick<Organization, 'plan' | 'currentPeriodEnd' | 'billingSource'>,
+  coupon: Pick<Coupon, 'plan'>,
+  redemption: { resultingPeriodEnd: Date | null; revokedAt: Date | null },
+): boolean {
+  return (
+    redemption.revokedAt === null &&
+    org.billingSource === 'manual' &&
+    org.plan === coupon.plan &&
+    (org.currentPeriodEnd?.getTime() ?? null) ===
+      (redemption.resultingPeriodEnd?.getTime() ?? null)
+  );
+}
+
+const PreviousPlan = z.object({
+  plan: z.enum(['pro', 'max']),
+  status: z.enum(['trialing', 'active', 'past_due', 'canceled']),
+  periodEnd: z.string().nullable(),
+  billingSource: z.enum(['manual', 'store']),
+  limitOverrides: z.unknown().nullable().optional(),
+});
+
+/// Revoca los canjes vigentes de un cupón: cada negocio que sigue con el plan
+/// del cupón vuelve al que tenía antes. Los que ya cambiaron de plan (compra,
+/// cambio manual) se omiten.
+export async function revokeRedemptions(
+  tx: Tx,
+  couponId: string,
+  now: Date,
+): Promise<{ revoked: string[]; skipped: string[] }> {
+  const coupon = await tx.coupon.findUniqueOrThrow({ where: { id: couponId } });
+  const redemptions = await tx.couponRedemption.findMany({
+    where: { couponId, revokedAt: null },
+    include: { organization: true },
+  });
+  const revoked: string[] = [];
+  const skipped: string[] = [];
+  for (const r of redemptions) {
+    const org = r.organization;
+    const previous = PreviousPlan.safeParse(r.previousPlan);
+    if (!stillFromCoupon(org, coupon, r) || !previous.success) {
+      skipped.push(org.id);
+      continue;
+    }
+    const p = previous.data;
+    await tx.organization.update({
+      where: { id: org.id },
+      data: {
+        plan: p.plan,
+        subscriptionStatus: p.status,
+        currentPeriodEnd: p.periodEnd ? new Date(p.periodEnd) : null,
+        billingSource: p.billingSource,
+        limitOverrides:
+          p.limitOverrides === null || p.limitOverrides === undefined
+            ? Prisma.DbNull
+            : (p.limitOverrides as Prisma.InputJsonValue),
+      },
+    });
+    await tx.couponRedemption.update({ where: { id: r.id }, data: { revokedAt: now } });
+    revoked.push(org.id);
+  }
+  return { revoked, skipped };
+}

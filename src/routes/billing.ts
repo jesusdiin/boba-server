@@ -13,6 +13,11 @@ import type { Db } from '../db.js';
 import { HttpError, unauthorized } from '../errors.js';
 import { entitlementsOf, planJson } from '../plans.js';
 import { Prisma } from '../../generated/prisma/client.js';
+import {
+  noopNotifier,
+  notifyPlanChanged,
+  type BranchNotifier,
+} from '../realtime/branchNotifier.js';
 import { requireBranchAdmin } from './branch.js';
 
 export interface BillingConfig {
@@ -20,6 +25,8 @@ export interface BillingConfig {
   fetchSubscriber?: SubscriberFetcher;
   /// Valor exacto del header `Authorization` del webhook.
   webhookSecret?: string;
+  /// Avisa a los equipos cuando el plan cambia (lo pone `createApp`).
+  notifier?: BranchNotifier;
 }
 
 const notConfigured = () =>
@@ -31,6 +38,7 @@ export async function syncStorePlan(
   db: Db,
   fetchSubscriber: SubscriberFetcher,
   organizationId: string,
+  notifier: BranchNotifier = noopNotifier,
 ): Promise<void> {
   const org = await db.organization.findUnique({ where: { id: organizationId } });
   if (!org) return;
@@ -46,6 +54,12 @@ export async function syncStorePlan(
       billingSource: 'store',
     },
   });
+  const changed =
+    org.plan !== store.plan ||
+    org.subscriptionStatus !== store.subscriptionStatus ||
+    org.currentPeriodEnd?.getTime() !== store.currentPeriodEnd?.getTime() ||
+    org.billingSource !== 'store';
+  if (changed) await notifyPlanChanged(db, notifier, org.id);
 }
 
 function sameSecret(given: string | undefined, expected: string): boolean {
@@ -86,7 +100,9 @@ export function billingWebhookRouter(db: Db, config: BillingConfig): Router {
       }
       throw err;
     }
-    for (const { id } of known) await syncStorePlan(db, fetchSubscriber, id);
+    for (const { id } of known) {
+      await syncStorePlan(db, fetchSubscriber, id, config.notifier);
+    }
     // Una org desconocida (otro ambiente, compra de prueba) no es error:
     // RevenueCat reintentaría para siempre.
     res.json({ ok: true, organizations: known.length });
@@ -104,7 +120,12 @@ export function billingDeviceRouter(db: Db, config: BillingConfig): Router {
     const device = requireDevice(req.device);
     await requireBranchAdmin(db, device, req.header('x-boba-user'));
     if (!config.fetchSubscriber) throw notConfigured();
-    await syncStorePlan(db, config.fetchSubscriber, device.organizationId);
+    await syncStorePlan(
+      db,
+      config.fetchSubscriber,
+      device.organizationId,
+      config.notifier,
+    );
     const org = await db.organization.findUniqueOrThrow({
       where: { id: device.organizationId },
     });

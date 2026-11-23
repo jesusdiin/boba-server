@@ -174,7 +174,9 @@ vencimiento (y límites extra opcionales). Se crean en el panel del operador.
   `already_unlimited`; 10 códigos inexistentes por equipo cada 15 min → `429`.
 - Panel: `GET/POST /v1/ops/coupons` (uno con código propio o un lote de hasta
   200 `BOBA-XXXX-XXXX`), `GET/PATCH /v1/ops/coupons/:id` (canjes,
-  deshabilitar). Base de referidos: `coupons.kind = referral` +
+  deshabilitar). `PATCH {disabled: true, revoke: true}` además revoca: los
+  negocios que siguen con el plan del cupón vuelven al que tenían antes (si
+  ya venció, la nube se pausa); los que cambiaron de plan se omiten. Base de referidos: `coupons.kind = referral` +
   `referrer_organization_id`; los canjes quedan en `coupon_redemptions`.
 
 #### Correo saliente (SMTP)
@@ -284,6 +286,8 @@ Solo avisos, nunca datos de negocio (los datos se bajan con el pull):
 
 - `{"type": "hello", "branchId": "…", "upTo": "123"}` al conectar.
 - `{"type": "events", "upTo": "130"}` tras cada push aceptado de la sucursal.
+- `{"type": "plan"}` cuando cambia el plan de la organización (panel, admin,
+  cupón, tienda): la app hace pull y recibe el plan nuevo.
 - Revocar el dispositivo cierra el socket con código **4401**.
 - Ping cada 30 s; un socket sin pong se cierra.
 

@@ -3,7 +3,11 @@ import { z } from 'zod';
 
 import type { Db } from '../db.js';
 import { notFound } from '../errors.js';
-import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
+import {
+  noopNotifier,
+  notifyPlanChanged,
+  type BranchNotifier,
+} from '../realtime/branchNotifier.js';
 import { hashPassword, newOperatorPassword } from '../auth/operatorAuth.js';
 import { promoteAdminsToOwners } from '../sync/ownerReplication.js';
 import { rebuildProjections } from '../sync/rules.js';
@@ -58,6 +62,7 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
 
   router.patch('/organizations/:orgId/plan', async (req, res) => {
     const updated = await updateOrgPlan(db, req.params.orgId, PlanPatch.parse(req.body));
+    await notifyPlanChanged(db, notifier, updated.id);
     res.json({ id: updated.id, plan: planJson(entitlementsOf(updated, new Date())) });
   });
 
@@ -119,14 +124,21 @@ export function adminRouter(db: Db, notifier: BranchNotifier = noopNotifier): Ro
   /// sale en esta respuesta; se cambia desde el panel.
   router.post('/operators', async (req, res) => {
     const body = z
-      .object({ email: z.string().trim().toLowerCase().email(), name: z.string().trim().min(1) })
+      .object({
+        email: z.string().trim().toLowerCase().email(),
+        name: z.string().trim().min(1),
+      })
       .parse(req.body);
     const password = newOperatorPassword();
     const operator = await db.operator.upsert({
       where: { email: body.email },
       create: { ...body, passwordHash: await hashPassword(password) },
       // Ya existía: se reactiva con contraseña nueva (recuperar acceso).
-      update: { name: body.name, passwordHash: await hashPassword(password), disabledAt: null },
+      update: {
+        name: body.name,
+        passwordHash: await hashPassword(password),
+        disabledAt: null,
+      },
     });
     await db.operatorSession.deleteMany({ where: { operatorId: operator.id } });
     res.status(201).json({ id: operator.id, email: operator.email, password });

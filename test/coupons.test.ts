@@ -154,9 +154,7 @@ describe('canjear un cupón', () => {
       where: { id: max.organizationId },
       data: { plan: 'max', subscriptionStatus: 'active' },
     });
-    expect((await redeem(max.token, max.owner, c2)).body.error.code).toBe(
-      'higher_plan',
-    );
+    expect((await redeem(max.token, max.owner, c2)).body.error.code).toBe('higher_plan');
 
     const free = await business();
     await t.db.organization.update({
@@ -270,5 +268,88 @@ describe('panel: cupones', () => {
       (e: { action: string }) => e.action,
     );
     expect(audit).toEqual(expect.arrayContaining(['coupon_created', 'coupon_disabled']));
+  });
+});
+
+describe('deshabilitar y revocar', () => {
+  it('sin revocar, el negocio conserva el plan', async () => {
+    const { agent, coupons } = await createCoupons({ plan: 'max', durationDays: null });
+    const b = await business();
+    await redeem(b.token, b.owner, coupons[0]!.code);
+    const res = await agent
+      .patch(`/v1/ops/coupons/${coupons[0]!.id}`)
+      .send({ disabled: true });
+    expect(res.body).toMatchObject({ status: 'disabled', revoked: [], skipped: [] });
+    expect(await orgOf(b.organizationId)).toMatchObject({
+      plan: 'max',
+      currentPeriodEnd: null,
+    });
+  });
+
+  it('revocar devuelve su plan anterior; si ya venció, queda vencido', async () => {
+    const { agent, coupons } = await createCoupons({
+      plan: 'max',
+      durationDays: null,
+      maxRedemptions: null,
+    });
+    const code = coupons[0]!.code;
+    const fresh = await business();
+    const trialEnd = (await orgOf(fresh.organizationId)).currentPeriodEnd!;
+    await redeem(fresh.token, fresh.owner, code);
+
+    const old = await business();
+    await t.db.organization.update({
+      where: { id: old.organizationId },
+      data: { currentPeriodEnd: new Date(Date.now() - 30 * DAY) },
+    });
+    await redeem(old.token, old.owner, code);
+
+    // Este después compró en la tienda: no se toca.
+    const bought = await business();
+    await redeem(bought.token, bought.owner, code);
+    await t.db.organization.update({
+      where: { id: bought.organizationId },
+      data: { billingSource: 'store' },
+    });
+
+    const detail = (await agent.get(`/v1/ops/coupons/${coupons[0]!.id}`)).body;
+    expect(
+      detail.redemptions.filter((r: { current: boolean }) => r.current),
+    ).toHaveLength(2);
+
+    const res = await agent
+      .patch(`/v1/ops/coupons/${coupons[0]!.id}`)
+      .send({ disabled: true, revoke: true });
+    expect(res.body.revoked.sort()).toEqual(
+      [fresh.organizationId, old.organizationId].sort(),
+    );
+    expect(res.body.skipped).toEqual([bought.organizationId]);
+
+    expect(await orgOf(fresh.organizationId)).toMatchObject({
+      plan: 'pro',
+      subscriptionStatus: 'trialing',
+      currentPeriodEnd: trialEnd,
+      billingSource: 'manual',
+    });
+    // La prueba vencida vuelve: el negocio queda pausado.
+    const lapsed = await request(t.app)
+      .get('/v1/sync/pull')
+      .set('authorization', `Bearer ${old.token}`);
+    expect(lapsed.status).toBe(402);
+    expect((await orgOf(bought.organizationId)).plan).toBe('max');
+
+    // No se revoca dos veces; la bitácora lo registra por negocio.
+    const again = await agent
+      .patch(`/v1/ops/coupons/${coupons[0]!.id}`)
+      .send({ disabled: true, revoke: true });
+    expect(again.body.revoked).toEqual([]);
+    const after = (await agent.get(`/v1/ops/coupons/${coupons[0]!.id}`)).body;
+    expect(
+      after.redemptions.filter((r: { revokedAt: string | null }) => r.revokedAt),
+    ).toHaveLength(2);
+    const org = (await agent.get(`/v1/ops/organizations/${fresh.organizationId}`)).body;
+    expect(org.audit.map((a: { action: string }) => a.action)).toContain(
+      'coupon_revoked',
+    );
   });
 });

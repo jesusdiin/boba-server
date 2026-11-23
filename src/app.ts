@@ -111,7 +111,7 @@ export function createApp({
   );
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
   // Sin `requireActivePlan`: un plan vencido se reactiva con un código.
-  app.use('/v1/coupons', deviceAuth(db), couponsRouter(db, couponThrottle));
+  app.use('/v1/coupons', deviceAuth(db), couponsRouter(db, couponThrottle, notifier));
   // Sin `requireActivePlan`: recuperar el PIN no depende del plan.
   app.use(
     '/v1/account',
@@ -122,8 +122,12 @@ export function createApp({
     }),
   );
   app.use('/v1/org', deviceAuth(db), requireActivePlan, orgRouter(db, notifier));
-  app.use('/v1/billing', billingWebhookRouter(db, billing));
-  app.use('/v1/billing', deviceAuth(db), billingDeviceRouter(db, billing));
+  app.use('/v1/billing', billingWebhookRouter(db, { ...billing, notifier }));
+  app.use(
+    '/v1/billing',
+    deviceAuth(db),
+    billingDeviceRouter(db, { ...billing, notifier }),
+  );
   app.use('/v1/branches', deviceAuth(db), requireActivePlan, snapshotRouter(db));
   app.use('/v1/media', deviceAuth(db), requireActivePlan, mediaRouter(db));
 

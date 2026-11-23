@@ -23,12 +23,23 @@ import {
   type Prices,
   type Segment,
 } from '../ops/stats.js';
-import { couponJson, NewCoupon, newCouponCode, normalizeCoupon } from '../coupons.js';
+import {
+  couponJson,
+  NewCoupon,
+  newCouponCode,
+  normalizeCoupon,
+  revokeRedemptions,
+  stillFromCoupon,
+} from '../coupons.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PlanPatch, updateOrgPlan } from '../orgPlan.js';
 import { createPairingCode } from '../pairing.js';
 import { entitlementsOf, planJson } from '../plans.js';
-import { noopNotifier, type BranchNotifier } from '../realtime/branchNotifier.js';
+import {
+  noopNotifier,
+  notifyPlanChanged,
+  type BranchNotifier,
+} from '../realtime/branchNotifier.js';
 import { promoteAdminsToOwners } from '../sync/ownerReplication.js';
 import { rebuildProjections } from '../sync/rules.js';
 import { sha256 } from '../tokens.js';
@@ -204,6 +215,7 @@ export function opsRouter(
     const body = PlanPatch.parse(req.body);
     const updated = await updateOrgPlan(db, req.params.id, body);
     await audit(req.operator!.id, 'plan_changed', updated.id, body);
+    await notifyPlanChanged(db, notifier, updated.id);
     res.json({ id: updated.id, plan: planJson(entitlementsOf(updated, new Date())) });
   });
 
@@ -220,6 +232,7 @@ export function opsRouter(
         currentPeriodEnd: new Date(from + days * DAY_MS),
       },
     });
+    await notifyPlanChanged(db, notifier, org.id);
     await audit(req.operator!.id, 'trial_extended', org.id, {
       days,
       periodEnd: updated.currentPeriodEnd,
@@ -357,7 +370,17 @@ export function opsRouter(
           include: {
             redemptions: {
               orderBy: { redeemedAt: 'desc' },
-              include: { organization: { select: { id: true, name: true } } },
+              include: {
+                organization: {
+                  select: {
+                    id: true,
+                    name: true,
+                    plan: true,
+                    currentPeriodEnd: true,
+                    billingSource: true,
+                  },
+                },
+              },
             },
           },
         })
@@ -367,9 +390,12 @@ export function opsRouter(
       ...couponJson(coupon, new Date()),
       redemptions: coupon.redemptions.map((r) => ({
         id: r.id,
-        organization: r.organization,
+        organization: { id: r.organization.id, name: r.organization.name },
         redeemedAt: r.redeemedAt,
         resultingPeriodEnd: r.resultingPeriodEnd,
+        revokedAt: r.revokedAt,
+        /// Sigue con el plan del cupón (revocarlo lo afectaría).
+        current: stillFromCoupon(r.organization, coupon, r),
       })),
     });
   });
@@ -378,6 +404,9 @@ export function opsRouter(
     const body = z
       .object({
         disabled: z.boolean().optional(),
+        /// Con `disabled: true`: también devuelve a su plan anterior a los
+        /// negocios que siguen con el plan del cupón.
+        revoke: z.boolean().optional(),
         note: z.string().trim().max(200).optional(),
       })
       .parse(req.body);
@@ -386,27 +415,39 @@ export function opsRouter(
       ? await db.coupon.findUnique({ where: { id: id.data } })
       : null;
     if (!coupon) throw notFound('Cupón no encontrado');
-    const updated = await db.coupon.update({
-      where: { id: coupon.id },
-      data: {
-        disabledAt:
-          body.disabled === undefined
-            ? undefined
-            : body.disabled
-              ? (coupon.disabledAt ?? new Date())
-              : null,
-        note: body.note,
-      },
+    const now = new Date();
+    const { updated, result } = await db.$transaction(async (tx) => {
+      const updated = await tx.coupon.update({
+        where: { id: coupon.id },
+        data: {
+          disabledAt:
+            body.disabled === undefined
+              ? undefined
+              : body.disabled
+                ? (coupon.disabledAt ?? now)
+                : null,
+          note: body.note,
+        },
+      });
+      const result =
+        body.disabled && body.revoke
+          ? await revokeRedemptions(tx, coupon.id, now)
+          : { revoked: [], skipped: [] };
+      return { updated, result };
     });
     if (body.disabled !== undefined) {
       await audit(
         req.operator!.id,
         body.disabled ? 'coupon_disabled' : 'coupon_enabled',
         null,
-        { code: coupon.code },
+        { code: coupon.code, ...(body.revoke ? result : {}) },
       );
     }
-    res.json(couponJson(updated, new Date()));
+    for (const orgId of result.revoked) {
+      await audit(req.operator!.id, 'coupon_revoked', orgId, { code: coupon.code });
+      await notifyPlanChanged(db, notifier, orgId);
+    }
+    res.json({ ...couponJson(updated, now), ...result });
   });
 
   return router;

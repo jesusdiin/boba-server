@@ -712,6 +712,8 @@ model CouponRedemption {
   /// Plan antes del canje (auditoría o revertir).
   previousPlan       Json      @map("previous_plan")
   resultingPeriodEnd DateTime? @map("resulting_period_end") @db.Timestamptz(3)
+  /// Revocado desde el panel: el negocio volvió a [previousPlan].
+  revokedAt          DateTime? @map("revoked_at") @db.Timestamptz(3)
 
   coupon       Coupon       @relation(fields: [couponId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)

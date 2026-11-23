@@ -25,7 +25,8 @@ async function connect(url: string, token: string) {
   const next = async (n: number) => {
     const deadline = Date.now() + 2000;
     while (messages.length < n) {
-      if (Date.now() > deadline) throw new Error(`esperaba ${n} mensajes: ${JSON.stringify(messages)}`);
+      if (Date.now() > deadline)
+        throw new Error(`esperaba ${n} mensajes: ${JSON.stringify(messages)}`);
       await new Promise<void>((resolve) => {
         waiters.push(resolve);
         setTimeout(resolve, 50);
@@ -33,7 +34,9 @@ async function connect(url: string, token: string) {
     }
     return messages[n - 1]!;
   };
-  const closed = new Promise<number>((resolve) => ws.once('close', (code) => resolve(code)));
+  const closed = new Promise<number>((resolve) =>
+    ws.once('close', (code) => resolve(code)),
+  );
   return { ws, messages, next, closed };
 }
 
@@ -59,7 +62,11 @@ describe('WS /v1/ws', () => {
     const lastSeq = pushed.body.accepted[1].serverSeq as string;
 
     const client = await connect(url, a.token);
-    expect(await client.next(1)).toEqual({ type: 'hello', branchId: a.branchId, upTo: lastSeq });
+    expect(await client.next(1)).toEqual({
+      type: 'hello',
+      branchId: a.branchId,
+      upTo: lastSeq,
+    });
     client.ws.close();
   });
 
@@ -100,5 +107,25 @@ describe('WS /v1/ws', () => {
 
     await t.admin().post(`/devices/${a.deviceId}/revoke`);
     expect(await client.closed).toBe(CLOSE_REVOKED);
+  });
+});
+
+describe('aviso de cambio de plan', () => {
+  it('cambiar el plan avisa {type: plan} a las sucursales del negocio y no a otras', async () => {
+    const url = await t.listen();
+    const a = await t.pairedDevice();
+    const other = await t.pairedDevice();
+    const mine = await connect(url, a.token);
+    const theirs = await connect(url, other.token);
+    await mine.next(1); // hello
+    await theirs.next(1);
+
+    await t.admin().patch(`/organizations/${a.orgId}/plan`, { plan: 'pro' });
+    expect(await mine.next(2)).toEqual({ type: 'plan' });
+    await settle();
+    expect(theirs.messages).toHaveLength(1);
+
+    mine.ws.close();
+    theirs.ws.close();
   });
 });

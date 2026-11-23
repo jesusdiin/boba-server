@@ -6,6 +6,11 @@ import { redeemCoupon } from '../coupons.js';
 import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { entitlementsOf, planJson } from '../plans.js';
+import {
+  noopNotifier,
+  notifyPlanChanged,
+  type BranchNotifier,
+} from '../realtime/branchNotifier.js';
 import { requireBranchAdmin } from './branch.js';
 import { PairingThrottle } from './devices.js';
 
@@ -14,6 +19,7 @@ import { PairingThrottle } from './devices.js';
 export function couponsRouter(
   db: Db,
   throttle = new PairingThrottle(10, 15 * 60 * 1000),
+  notifier: BranchNotifier = noopNotifier,
 ): Router {
   const router = Router();
 
@@ -27,6 +33,8 @@ export function couponsRouter(
       const { org } = await db.$transaction((tx) =>
         redeemCoupon(tx, device.organizationId, code, new Date()),
       );
+      // Los demás equipos del negocio lo reciben al momento.
+      await notifyPlanChanged(db, notifier, org.id);
       res.json({ plan: planJson(entitlementsOf(org, new Date()), org.id) });
     } catch (e) {
       // Solo los códigos que no existen cuentan para el freno (adivinar).
