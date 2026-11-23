@@ -24,6 +24,8 @@ import { branchRouter } from './routes/branch.js';
 import { devicesRouter } from './routes/devices.js';
 import type { Throttle } from './throttle.js';
 import { mediaRouter } from './routes/media.js';
+import type { PushSender } from './push/sender.js';
+import { pushRouter } from './routes/push.js';
 import { signupRouter } from './routes/signup.js';
 import { snapshotRouter } from './routes/snapshot.js';
 import { syncRouter } from './routes/sync.js';
@@ -43,7 +45,9 @@ export interface AppDeps {
   /// Rechazar cambios de usuarios/catálogo sin actor (`REQUIRE_EVENT_ACTOR`).
   requireEventActor?: boolean;
   /// Panel del operador: orígenes con CORS y precios para el MRR.
-  ops?: { origins?: string[]; prices?: Prices; throttle?: Throttle };
+  ops?: { origins?: string[]; prices?: Prices; throttle?: Throttle; push?: PushSender };
+  /// Registros de instalaciones para push por IP (`PUT /v1/push/token`).
+  pushThrottle?: Throttle;
   /// Correos de la cuenta del Dueño; sin él, van al log (desarrollo).
   mailer?: Mailer;
   /// Envíos de códigos por usuario (pruebas).
@@ -78,6 +82,7 @@ export function createApp({
   accountThrottle,
   couponThrottle,
   trustProxy = false,
+  pushThrottle,
 }: AppDeps): Express {
   const app = express();
   // Detrás de nginx: la IP real del cliente (frenos por IP).
@@ -100,9 +105,12 @@ export function createApp({
     opsRouter(db, notifier, {
       prices: ops.prices ?? { pro: 14900, max: 34900 },
       throttle: ops.throttle,
+      push: ops.push,
     }),
   );
   app.use('/v1/devices', devicesRouter(db, pairingThrottle));
+  // Público: también se registran las instalaciones sin nube.
+  app.use('/v1/push', pushRouter(db, pushThrottle));
   app.use(
     '/v1/signup',
     signupRouter(db, { enabled: signupEnabled, throttle: signupThrottle }),

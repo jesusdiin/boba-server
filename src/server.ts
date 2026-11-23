@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { revenueCatFetcher } from './billing/revenuecat.js';
 import { createDb } from './db.js';
 import { loadEnv } from './env.js';
+import { FcmSender } from './push/sender.js';
 import { purgeUnusedMedia } from './media/cleanup.js';
 import { ConsoleMailer, SmtpMailer } from './mail/mailer.js';
 import { InProcessBranchNotifier } from './realtime/branchNotifier.js';
@@ -30,6 +31,7 @@ const throttles = {
   ops: new DbThrottle(db, 'ops-login', 10, 15 * MIN),
   account: new DbThrottle(db, 'account', 3, 15 * MIN),
   coupon: new DbThrottle(db, 'coupon', 10, 15 * MIN),
+  push: new DbThrottle(db, 'push', 30, 15 * MIN),
 };
 const purge = setInterval(() => {
   purgeExpiredThrottles(db).catch((err: unknown) =>
@@ -60,6 +62,10 @@ const mailer = env.SMTP_HOST
       from: env.MAIL_FROM,
     })
   : new ConsoleMailer(logger);
+const push = env.FIREBASE_SERVICE_ACCOUNT_FILE
+  ? FcmSender.fromServiceAccountFile(env.FIREBASE_SERVICE_ACCOUNT_FILE)
+  : undefined;
+if (!push) logger.warn('FIREBASE_SERVICE_ACCOUNT_FILE vacío: el panel no puede mandar avisos');
 const app = createApp({
   db,
   adminApiKey: env.ADMIN_API_KEY,
@@ -73,8 +79,10 @@ const app = createApp({
   signupThrottle: throttles.signup,
   accountThrottle: throttles.account,
   couponThrottle: throttles.coupon,
+  pushThrottle: throttles.push,
   ops: {
     throttle: throttles.ops,
+    push,
     origins: env.ADMIN_PANEL_ORIGIN,
     prices: { pro: env.PLAN_PRICE_PRO_CENTS, max: env.PLAN_PRICE_MAX_CENTS },
   },

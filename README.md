@@ -302,6 +302,18 @@ encuadre). Una vez al día se borran las que ningún producto ni sabor del
 negocio usa y tienen más de 7 días (`src/media/cleanup.ts`): la que se
 reemplazó, la que se quitó o la de un producto que nunca se guardó.
 
+### Notificaciones push (FCM)
+Cada instalación de la app se registra en `PUT /v1/push/token` (pública:
+también las que usan la app sin nube; con el token de equipo queda ligada a
+su negocio) y se borra con `DELETE /v1/push/token`. Desde el panel, la vista
+"Avisos" (`/v1/ops/push/*`) manda un aviso a todas las instalaciones o a un
+negocio; los tokens que FCM ya no reconoce se borran solos.
+
+Para enviar hace falta la cuenta de servicio de Firebase (Configuración del
+proyecto → Cuentas de servicio → Generar nueva clave privada) en
+`FIREBASE_SERVICE_ACCOUNT_FILE`. Sin ella, el registro funciona pero enviar
+responde 503.
+
 ### Frenos e IP real
 Los frenos de intentos (alta de negocios 5/h por IP, emparejamiento y login
 del panel 10/15 min, códigos por correo 3/15 min por usuario, cupones 10/15

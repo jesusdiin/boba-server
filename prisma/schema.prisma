@@ -732,3 +732,39 @@ model RateLimit {
   @@index([resetAt])
   @@map("rate_limits")
 }
+
+/// Instalación de la app que recibe notificaciones push (FCM). Anónima si
+/// se registró sin token de equipo; si no, ligada a su negocio y equipo.
+model PushToken {
+  /// Id de instalación de Firebase (FID) que manda la app.
+  token          String    @id
+  /// `android` | `ios`.
+  platform       String
+  appVersion     String?   @map("app_version")
+  locale         String?
+  organizationId String?   @map("organization_id") @db.Uuid
+  deviceId       String?   @map("device_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@map("push_tokens")
+}
+
+/// Aviso enviado por un operador desde el panel.
+model PushCampaign {
+  id             String   @id @default(uuid()) @db.Uuid
+  operatorId     String   @map("operator_id") @db.Uuid
+  title          String
+  body           String
+  /// `all` | `organization`.
+  audience       String
+  organizationId String?  @map("organization_id") @db.Uuid
+  targeted       Int
+  sent           Int
+  failed         Int
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@map("push_campaigns")
+}

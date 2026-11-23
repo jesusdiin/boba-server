@@ -8,6 +8,7 @@ import { afterAll, beforeEach } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import { createDb } from '../src/db.js';
+import { FakePushSender, type PushSender } from '../src/push/sender.js';
 import { InProcessBranchNotifier } from '../src/realtime/branchNotifier.js';
 import { attachRealtime } from '../src/realtime/wsServer.js';
 import type { BillingConfig } from '../src/routes/billing.js';
@@ -24,11 +25,16 @@ export function setupTestApp({
   requireEventActor,
   accountSends = 1000,
   couponFailures = 1000,
+  pushSender = new FakePushSender(),
+  pushRegistrations = 1000,
 }: {
   billing?: BillingConfig;
   requireEventActor?: boolean;
   accountSends?: number;
   couponFailures?: number;
+  /// `null`: sin Firebase configurado.
+  pushSender?: PushSender | null;
+  pushRegistrations?: number;
 } = {}) {
   const db = createDb(process.env.DATABASE_URL ?? '');
   const logger = pino({ level: 'silent' });
@@ -50,7 +56,9 @@ export function setupTestApp({
       origins: [PANEL_ORIGIN],
       prices: { pro: 14900, max: 34900 },
       throttle: new MemoryThrottle(1000),
+      push: pushSender ?? undefined,
     },
+    pushThrottle: new MemoryThrottle(pushRegistrations),
   });
 
   // Servidor HTTP real (puerto efímero) solo para los tests de WebSocket.
@@ -75,7 +83,7 @@ export function setupTestApp({
         'branch_incoming_orders, branch_products, branch_product_modifier_groups, ' +
         'branch_modifier_options, branch_modifier_groups, branch_categories, ' +
         'branch_supplies, branch_users, events, media, device_pairing_codes, devices, ' +
-        'branches, billing_events, owner_accounts, email_codes, coupon_redemptions, coupons, rate_limits, organizations, operator_audit, operator_sessions, ' +
+        'branches, billing_events, owner_accounts, email_codes, coupon_redemptions, coupons, rate_limits, push_tokens, push_campaigns, organizations, operator_audit, operator_sessions, ' +
         'operators RESTART IDENTITY CASCADE',
     );
   });
@@ -183,6 +191,7 @@ export function setupTestApp({
     listen,
     admin,
     pairedDevice,
+    pushSender,
     pairAnother,
     push,
     pull,

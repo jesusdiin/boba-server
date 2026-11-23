@@ -42,6 +42,7 @@ import {
 } from '../realtime/branchNotifier.js';
 import { promoteAdminsToOwners } from '../sync/ownerReplication.js';
 import { rebuildProjections } from '../sync/rules.js';
+import type { PushSender } from '../push/sender.js';
 import { sha256 } from '../tokens.js';
 import { MemoryThrottle, type Throttle } from '../throttle.js';
 
@@ -72,7 +73,21 @@ const ExtendTrial = z.object({ days: z.number().int().min(1).max(90) });
 export interface OpsConfig {
   prices: Prices;
   throttle?: Throttle;
+  /// Notificaciones push; sin él, enviar avisos responde 503.
+  push?: PushSender;
 }
+
+const NewCampaign = z
+  .object({
+    title: z.string().trim().min(1).max(65),
+    body: z.string().trim().min(1).max(240),
+    audience: z.enum(['all', 'organization']),
+    organizationId: z.uuid().optional(),
+  })
+  .refine((c) => c.audience === 'all' || c.organizationId, {
+    message: 'Elige el negocio',
+    path: ['organizationId'],
+  });
 
 /// API del panel del operador (boba_admin): estadísticas del sistema,
 /// negocios y acciones de soporte. Sesión por cookie (`operatorAuth.ts`);
@@ -80,7 +95,7 @@ export interface OpsConfig {
 export function opsRouter(
   db: Db,
   notifier: BranchNotifier = noopNotifier,
-  { prices, throttle = new MemoryThrottle(10, 15 * 60 * 1000) }: OpsConfig,
+  { prices, throttle = new MemoryThrottle(10, 15 * 60 * 1000), push }: OpsConfig,
 ): Router {
   const router = Router();
 
@@ -448,6 +463,94 @@ export function opsRouter(
       await notifyPlanChanged(db, notifier, orgId);
     }
     res.json({ ...couponJson(updated, now), ...result });
+  });
+
+  // --- Avisos (notificaciones push) ---------------------------------------------
+
+  router.get('/push/stats', async (_req, res) => {
+    const since = new Date(Date.now() - 14 * DAY_MS);
+    const [total, linked, recent] = await Promise.all([
+      db.pushToken.count(),
+      db.pushToken.count({ where: { organizationId: { not: null } } }),
+      db.pushToken.count({ where: { lastSeenAt: { gte: since } } }),
+    ]);
+    res.json({
+      configured: push != null,
+      installs: total,
+      linked,
+      anonymous: total - linked,
+      seenLast14Days: recent,
+    });
+  });
+
+  router.get('/push/campaigns', async (_req, res) => {
+    const campaigns = await db.pushCampaign.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const operators = await db.operator.findMany({
+      where: { id: { in: [...new Set(campaigns.map((c) => c.operatorId))] } },
+      select: { id: true, name: true },
+    });
+    const orgs = await db.organization.findMany({
+      where: {
+        id: { in: campaigns.flatMap((c) => (c.organizationId ? [c.organizationId] : [])) },
+      },
+      select: { id: true, name: true },
+    });
+    const name = (list: { id: string; name: string }[], id: string | null) =>
+      list.find((x) => x.id === id)?.name ?? null;
+    res.json({
+      campaigns: campaigns.map((c) => ({
+        ...c,
+        operatorName: name(operators, c.operatorId),
+        organizationName: name(orgs, c.organizationId),
+      })),
+    });
+  });
+
+  router.post('/push/campaigns', async (req, res) => {
+    const body = NewCampaign.parse(req.body);
+    if (!push) {
+      throw new HttpError(503, 'push_not_configured', 'Las notificaciones no están configuradas');
+    }
+    const organizationId = body.audience === 'organization' ? body.organizationId! : null;
+    if (organizationId) {
+      const org = await db.organization.findUnique({ where: { id: organizationId } });
+      if (!org) throw notFound('Negocio no encontrado');
+    }
+    const tokens = (
+      await db.pushToken.findMany({
+        where: organizationId ? { organizationId } : {},
+        select: { token: true },
+      })
+    ).map((t) => t.token);
+    if (tokens.length === 0) {
+      throw new HttpError(409, 'no_installs', 'Nadie recibiría este aviso');
+    }
+    const result = await push.send(tokens, { title: body.title, body: body.body });
+    if (result.invalidTokens.length > 0) {
+      await db.pushToken.deleteMany({ where: { token: { in: result.invalidTokens } } });
+    }
+    const campaign = await db.pushCampaign.create({
+      data: {
+        operatorId: req.operator!.id,
+        title: body.title,
+        body: body.body,
+        audience: body.audience,
+        organizationId,
+        targeted: tokens.length,
+        sent: result.sent,
+        failed: result.failed,
+      },
+    });
+    await audit(req.operator!.id, 'push_sent', organizationId, {
+      title: body.title,
+      targeted: tokens.length,
+      sent: result.sent,
+      failed: result.failed,
+    });
+    res.status(201).json({ ...campaign, removed: result.invalidTokens.length });
   });
 
   return router;

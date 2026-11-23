@@ -52,6 +52,9 @@ const Env = z.object({
   /// Avisos en tiempo real: `postgres` (LISTEN/NOTIFY, sirve con una o varias
   /// instancias) o `memory` (solo una instancia).
   REALTIME_BACKEND: z.enum(['postgres', 'memory']).default('postgres'),
+  /// JSON de la cuenta de servicio de Firebase (notificaciones push). Sin él,
+  /// el panel no puede mandar avisos (las instalaciones sí se registran).
+  FIREBASE_SERVICE_ACCOUNT_FILE: z.string().min(1).optional(),
   PORT: z.coerce.number().int().min(0).default(4000),
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
