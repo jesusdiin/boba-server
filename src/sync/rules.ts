@@ -128,6 +128,47 @@ const reject = (
   details?: Record<string, unknown>,
 ): RuleResult => ({ ok: false, code, message, details });
 
+const INFLOW_KINDS: ReadonlySet<string> = new Set(['income']);
+
+/// Contramovimiento (`reversesId`): cancela un movimiento de caja de esta
+/// sucursal con el mismo monto y signo contrario, una sola vez. `null` si es
+/// válido.
+async function checkReversal(
+  tx: Tx,
+  branchId: string,
+  payload: Payload,
+): Promise<RuleResult | null> {
+  const originalId = payload.reversesId;
+  if (typeof originalId !== 'string' || originalId === '') {
+    return reject('invalid_event', 'Cancelación inválida');
+  }
+  const original = await tx.branchCashMovement.findUnique({
+    where: { branchId_id: { branchId, id: originalId } },
+  });
+  if (!original) {
+    return reject('invalid_event', 'El movimiento a cancelar no existe en la sucursal');
+  }
+  const originalRow = (original.row ?? {}) as Payload;
+  if (originalRow.reversesId != null) {
+    return reject('invalid_event', 'Una cancelación no se puede cancelar');
+  }
+  const inflow = (kind: unknown) => INFLOW_KINDS.has(String(kind));
+  if (
+    payload.amountCents !== original.amountCents ||
+    inflow(payload.kind) === inflow(original.kind)
+  ) {
+    return reject('invalid_event', 'La cancelación debe tener el mismo monto y signo contrario');
+  }
+  const existing = await tx.branchCashMovement.findFirst({
+    where: { branchId, row: { path: ['reversesId'], equals: originalId } },
+    select: { id: true },
+  });
+  if (existing && existing.id !== payload.id) {
+    return reject('already_cancelled', 'Ese movimiento ya estaba cancelado');
+  }
+  return null;
+}
+
 /// Árbitro de la sucursal: valida un evento contra el estado vigente y lo
 /// reescribe si hace falta. Se llama con la sucursal bloqueada (`FOR UPDATE`),
 /// en orden, antes de guardar el evento; después se llama a [project].
@@ -166,6 +207,10 @@ export async function applyRules(
     ) {
       return reject('invalid_event', 'Datos del negocio inválidos');
     }
+  }
+  if (event.type === 'cash_movement.created' && payload.reversesId != null) {
+    const verdict = await checkReversal(tx, branchId, payload);
+    if (verdict) return verdict;
   }
   if (event.type === 'branch.theme_set') {
     if (!THEMES.has(String(payload.theme)) || typeof payload.automatic !== 'boolean') {

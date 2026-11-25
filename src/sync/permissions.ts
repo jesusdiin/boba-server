@@ -16,6 +16,8 @@ export type Permission =
   | 'markSoldOut'
   | 'manageAppearance'
   | 'manageBusiness'
+  /// Cancelar un movimiento de caja (contramovimiento con `reversesId`).
+  | 'cancelCashMovements'
   /// Plan y pago, sucursales y nombre del negocio (solo el Dueño).
   | 'manageOrganization';
 
@@ -62,7 +64,11 @@ export function actorAndPermission(
     case 'sale.created':
       return { actor: str(obj(payload.sale)?.userId), permission: 'sell' };
     case 'cash_movement.created':
-      return { actor: str(payload.userId), permission: 'expenses' };
+      return {
+        actor: str(payload.userId),
+        // Un contramovimiento cancela otro: solo Admin y Dueño.
+        permission: payload.reversesId != null ? 'cancelCashMovements' : 'expenses',
+      };
     case 'supply_movement.created':
       return {
         actor: str(payload.userId),
