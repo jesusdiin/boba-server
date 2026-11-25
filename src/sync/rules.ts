@@ -41,6 +41,10 @@ const VERSIONED: Readonly<Record<string, string>> = {
 
 /// Temas de la app (`AppThemeId` en boba_pos/lib/core/theme/app_themes.dart).
 const THEMES: ReadonlySet<string> = new Set(['boba', 'minimal', 'dark']);
+/// Variante de `dark`: `neutral` = Grafito (oscuro sin rosa). Viaja aparte
+/// para que las apps anteriores, que solo conocen los tres temas, lo apliquen
+/// como Oscuro en vez de detener su sync.
+const THEME_TONES: ReadonlySet<string> = new Set(['neutral']);
 
 /// Tipografías (`AppFontId` en boba_pos/lib/core/theme/app_fonts.dart).
 const FONTS: ReadonlySet<string> = new Set(['classic', 'editorial', 'modern']);
@@ -166,6 +170,12 @@ export async function applyRules(
   if (event.type === 'branch.theme_set') {
     if (!THEMES.has(String(payload.theme)) || typeof payload.automatic !== 'boolean') {
       return reject('invalid_event', 'Tema inválido');
+    }
+    if (
+      payload.tone != null &&
+      (payload.theme !== 'dark' || !THEME_TONES.has(String(payload.tone)))
+    ) {
+      return reject('invalid_event', 'Variante de tema inválida');
     }
     // `font` es opcional (null = la tipografía del tema).
     if (payload.font != null && !FONTS.has(String(payload.font))) {

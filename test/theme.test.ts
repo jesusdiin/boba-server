@@ -28,7 +28,39 @@ describe('branch.theme_set (tema de la sucursal)', () => {
     expect(res.body.accepted).toHaveLength(2);
 
     const snapshot = await t.snapshot(token, branchId);
-    expect(snapshot.body.branchTheme).toMatchObject({ theme: 'minimal', automatic: true });
+    expect(snapshot.body.branchTheme).toMatchObject({
+      theme: 'minimal',
+      automatic: true,
+    });
+  });
+
+  it('Grafito (dark + tone neutral) llega igual a otro equipo y al snapshot', async () => {
+    const { token, branchId } = await t.pairedDevice();
+    const other = await t.pairAnother(branchId, 'Tablet');
+    const res = await t.push(token, [
+      themeSet(branchId, 'dark', '2026-11-05T15:00:00.000Z', { tone: 'neutral' }),
+    ]);
+    expect(res.body.accepted).toHaveLength(1);
+
+    const pulled = await t.pull(other.token);
+    const event = pulled.body.events.find(
+      (e: { type: string }) => e.type === 'branch.theme_set',
+    );
+    expect(event.payload).toMatchObject({ theme: 'dark', tone: 'neutral' });
+
+    const snapshot = await t.snapshot(other.token, branchId);
+    expect(snapshot.body.branchTheme).toMatchObject({ theme: 'dark', tone: 'neutral' });
+  });
+
+  it('rechaza una variante desconocida o fuera de Oscuro', async () => {
+    const { token, branchId } = await t.pairedDevice();
+    const at = '2026-11-05T15:00:00.000Z';
+    const bad = await t.push(token, [
+      themeSet(branchId, 'dark', at, { tone: 'sepia' }),
+      themeSet(branchId, 'minimal', at, { tone: 'neutral' }),
+    ]);
+    expect(bad.body.rejected).toHaveLength(2);
+    expect(bad.body.rejected[0]).toMatchObject({ code: 'invalid_event' });
   });
 
   it('sin cambios de tema, el snapshot trae null', async () => {
@@ -39,15 +71,21 @@ describe('branch.theme_set (tema de la sucursal)', () => {
   it('acepta una tipografía conocida y rechaza una desconocida', async () => {
     const { token, branchId } = await t.pairedDevice();
     const at = '2026-11-05T15:00:00.000Z';
-    const ok = await t.push(token, [themeSet(branchId, 'minimal', at, { font: 'modern' })]);
+    const ok = await t.push(token, [
+      themeSet(branchId, 'minimal', at, { font: 'modern' }),
+    ]);
     expect(ok.body.accepted).toHaveLength(1);
-    const bad = await t.push(token, [themeSet(branchId, 'minimal', at, { font: 'comic' })]);
+    const bad = await t.push(token, [
+      themeSet(branchId, 'minimal', at, { font: 'comic' }),
+    ]);
     expect(bad.body.rejected[0]).toMatchObject({ code: 'invalid_event' });
   });
 
   it('rechaza un tema desconocido', async () => {
     const { token, branchId } = await t.pairedDevice();
-    const res = await t.push(token, [themeSet(branchId, 'neon', '2026-11-05T15:00:00.000Z')]);
+    const res = await t.push(token, [
+      themeSet(branchId, 'neon', '2026-11-05T15:00:00.000Z'),
+    ]);
     expect(res.body.rejected[0]).toMatchObject({ code: 'invalid_event' });
   });
 
@@ -58,11 +96,15 @@ describe('branch.theme_set (tema de la sucursal)', () => {
     await t.push(token, [cashier, admin]);
 
     const denied = await t.push(token, [
-      themeSet(branchId, 'dark', '2026-11-05T15:00:00.000Z', { userId: cashier.aggregateId }),
+      themeSet(branchId, 'dark', '2026-11-05T15:00:00.000Z', {
+        userId: cashier.aggregateId,
+      }),
     ]);
     expect(denied.body.rejected[0]).toMatchObject({ code: 'forbidden' });
     const ok = await t.push(token, [
-      themeSet(branchId, 'dark', '2026-11-05T15:00:00.000Z', { userId: admin.aggregateId }),
+      themeSet(branchId, 'dark', '2026-11-05T15:00:00.000Z', {
+        userId: admin.aggregateId,
+      }),
     ]);
     expect(ok.body.accepted).toHaveLength(1);
   });
