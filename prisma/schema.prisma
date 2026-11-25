@@ -744,6 +744,9 @@ model PushToken {
   locale         String?
   organizationId String?   @map("organization_id") @db.Uuid
   deviceId       String?   @map("device_id") @db.Uuid
+  /// Tipos de aviso que la instalación apagó (`orders`, `shifts`, `stock`,
+  /// `news`). Vacío = todos; las apps sin preferencias reciben todo.
+  mutedTopics    String[]  @default([]) @map("muted_topics")
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
 

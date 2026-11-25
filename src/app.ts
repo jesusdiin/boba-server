@@ -121,7 +121,7 @@ export function createApp({
     '/v1/sync',
     deviceAuth(db),
     requireActivePlan,
-    syncRouter(db, notifier, { requireActor: requireEventActor }),
+    syncRouter(db, notifier, { requireActor: requireEventActor }, ops.push),
   );
   app.use('/v1/branch', deviceAuth(db), branchRouter(db, notifier));
   // Sin `requireActivePlan`: un plan vencido se reactiva con un código.

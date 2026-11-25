@@ -521,7 +521,11 @@ export function opsRouter(
     }
     const tokens = (
       await db.pushToken.findMany({
-        where: organizationId ? { organizationId } : {},
+        // Sin quienes apagaron "Novedades" en Ajustes.
+        where: {
+          ...(organizationId ? { organizationId } : {}),
+          NOT: { mutedTopics: { has: 'news' } },
+        },
         select: { token: true },
       })
     ).map((t) => t.token);

@@ -6,6 +6,12 @@ import type { Db } from '../db.js';
 import { HttpError } from '../errors.js';
 import { planJson } from '../plans.js';
 import type { BranchNotifier } from '../realtime/branchNotifier.js';
+import {
+  noticesFor,
+  sendBranchNotices,
+  type BranchNotice,
+} from '../push/branchNotices.js';
+import type { PushSender } from '../push/sender.js';
 import { insertEvent } from '../sync/events.js';
 import { replicateToOrganization } from '../sync/ownerReplication.js';
 import { applyRules, type RuleOptions } from '../sync/rules.js';
@@ -37,6 +43,8 @@ export function syncRouter(
   db: Db,
   notifier: BranchNotifier,
   options: RuleOptions = {},
+  /// Avisos automáticos a los equipos de la sucursal (sin él, no hay).
+  push?: PushSender,
 ): Router {
   const router = Router();
 
@@ -59,6 +67,8 @@ export function syncRouter(
     const valid: PushedEvent[] = [];
     // Eventos de un Dueño: se copian a las demás sucursales tras el commit.
     const toReplicate: { eventId: string }[] = [];
+    // Avisos push que disparan los eventos aceptados (se mandan tras el commit).
+    const notices: BranchNotice[] = [];
 
     for (const raw of parsedBody.data.events) {
       const parsed = PushedEvent.safeParse(raw);
@@ -87,6 +97,12 @@ export function syncRouter(
         // Un árbitro por sucursal a la vez: los pushes concurrentes de la
         // misma sucursal esperan aquí y se evalúan en orden.
         await tx.$queryRaw`SELECT id FROM branches WHERE id = ${device.branchId}::uuid FOR UPDATE`;
+        const branchInfo = push
+          ? await tx.branch.findUnique({
+              where: { id: device.branchId },
+              select: { name: true, currencyCode: true },
+            })
+          : null;
 
         for (const e of valid) {
           // Reenvío: idempotente si es de esta sucursal (no se re-arbitra); si
@@ -129,6 +145,15 @@ export function syncRouter(
             createdAt: new Date(e.createdAtUtc),
           });
           if (verdict.replicateToOrg) toReplicate.push({ eventId: e.eventId });
+          if (branchInfo) {
+            notices.push(
+              ...(await noticesFor(tx, device.branchId, branchInfo, {
+                type: e.type,
+                createdAtUtc: e.createdAtUtc,
+                payload,
+              })),
+            );
+          }
           accepted.push({ eventId: e.eventId, serverSeq: serverSeq.toString() });
         }
       },
@@ -143,6 +168,22 @@ export function syncRouter(
       // equipo no ve error (las copias son idempotentes al reintentarse).
       await replicateToOrganization(db, notifier, device.branchId, toReplicate).catch(
         (err: unknown) => req.log.error({ err }, 'No se pudo replicar al Dueño'),
+      );
+    }
+
+    // Avisos push sin esperar: un fallo de FCM nunca afecta al sync.
+    if (push && notices.length > 0) {
+      void sendBranchNotices(
+        db,
+        push,
+        {
+          organizationId: device.organizationId,
+          branchId: device.branchId,
+          originDeviceId: device.id,
+        },
+        notices,
+      ).catch((err: unknown) =>
+        req.log.error({ err }, 'No se pudieron mandar los avisos'),
       );
     }
 

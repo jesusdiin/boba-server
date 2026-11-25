@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { bearerToken, resolveDevice } from '../auth/deviceAuth.js';
 import type { Db } from '../db.js';
+import { PUSH_TOPICS } from '../push/branchNotices.js';
 import { MemoryThrottle, type Throttle } from '../throttle.js';
 
 const TokenBody = z.object({ token: z.string().trim().min(10).max(4096) });
@@ -11,6 +12,9 @@ const Register = TokenBody.extend({
   platform: z.enum(['android', 'ios']),
   appVersion: z.string().trim().max(40).optional(),
   locale: z.string().trim().max(20).optional(),
+  /// Tipos de aviso apagados en Ajustes. Sin el campo (apps anteriores) no
+  /// se cambian.
+  mutedTopics: z.array(z.enum(PUSH_TOPICS)).max(PUSH_TOPICS.length).optional(),
 });
 
 /// Registro de instalaciones para notificaciones push. Público: la app sin
@@ -36,6 +40,7 @@ export function pushRouter(
       organizationId: device?.organizationId ?? null,
       deviceId: device?.id ?? null,
       lastSeenAt: new Date(),
+      ...(body.mutedTopics ? { mutedTopics: [...new Set(body.mutedTopics)] } : {}),
     };
     await db.pushToken.upsert({
       where: { token: body.token },
